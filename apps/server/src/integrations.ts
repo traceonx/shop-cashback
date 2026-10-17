@@ -117,6 +117,21 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
   })
   return integrationStatus(kind)
 }
+// 企业微信错误码说明；原始 errmsg 中常带有被拒绝的 IP（from ip: x.x.x.x），一并展示
+const wecomHints: Record<number, string> = {
+  40001: '应用 Secret 不正确：请确认使用的是该 AgentId 对应自建应用的 Secret（应用管理 → 应用 → Secret 查看），且未被重置',
+  40013: '企业ID 不正确：请在企业微信后台「我的企业」页底部复制企业ID',
+  40091: '应用 Secret 格式不正确，请重新复制完整的 Secret',
+  42001: 'access_token 已过期，请重试',
+  60020: '请求 IP 不在该应用的「企业可信IP」中：在应用管理 → 本应用 → 企业可信IP 里加入下方提示的 IP（使用代理时为代理服务器的公网 IP）',
+  60011: '应用无权限：请检查应用可见范围，或管理员是否在可见范围内',
+  81013: '接收人不在应用可见范围内，或 UserID 不存在',
+}
+export function wecomError(prefix: string, data: { errcode?: unknown; errmsg?: unknown }) {
+  const code = Number(data.errcode) || 0
+  const ip = /from ip:\s*([\d.:a-f]+)/i.exec(String(data.errmsg || ''))?.[1]
+  return `${prefix}（错误码 ${code || 'UNKNOWN'}）${wecomHints[code] ? '：' + wecomHints[code] : ''}${ip ? `。被拒绝的 IP：${ip}` : ''}`
+}
 // 企业微信接口基址：配置了代理地址时经由代理转发（参考 MoviePilot 的 WECHAT_PROXY），否则直连官方
 export const wecomUrl = (c: Config, path: string) =>
   `${(c.proxy || 'https://qyapi.weixin.qq.com').trim().replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
@@ -133,17 +148,8 @@ export async function wecomToken(c: Config) {
   }
   if (!response.ok) throw new ServiceUnavailableException('企业微信接口不可用')
   const data = (await response.json()) as any
-  if (data.errcode !== 0 || !data.access_token) {
-    const code = Number(data.errcode) || 0
-    const hint: Record<number, string> = {
-      40001: '应用 Secret 不正确：请确认使用的是该 AgentId 对应自建应用的 Secret（应用管理 → 应用 → Secret 查看），且未被重置',
-      40013: '企业ID 不正确：请在企业微信后台「我的企业」页底部复制企业ID',
-      40091: '应用 Secret 格式不正确，请重新复制完整的 Secret',
-      42001: 'access_token 已过期，请重试',
-      60020: '请求 IP 不在应用的「企业可信IP」中：请把出口 IP 加入可信IP，或填写代理地址',
-    }
-    throw new BadRequestException(`企业微信凭证验证失败（错误码 ${code || 'UNKNOWN'}）${hint[code] ? '：' + hint[code] : ''}`)
-  }
+  if (data.errcode !== 0 || !data.access_token)
+    throw new BadRequestException(wecomError('企业微信凭证验证失败', data))
   return String(data.access_token)
 }
 export async function testConnection(kind: Provider, actor: string, trace: string) {

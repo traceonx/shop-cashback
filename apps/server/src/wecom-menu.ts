@@ -1,6 +1,6 @@
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common'
 import { db, audit, json } from './database'
-import { readConfig, wecomToken, wecomUrl } from './integrations'
+import { readConfig, wecomToken, wecomUrl, wecomError } from './integrations'
 
 export const menuActions = {
   HELP_SHOP: { label: '如何查返利', command: '/查返利' },
@@ -66,8 +66,11 @@ export async function publishMenu(value: unknown, actor: string, trace: string) 
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(menuPayload(draft)), signal: AbortSignal.timeout(10000), redirect: 'error',
     })
   } catch { throw new ServiceUnavailableException('菜单发布请求失败或超时，请检查企业微信后台实际菜单后重试') }
-  const result = await response.json() as { errcode?: number }
-  if (!response.ok || result.errcode !== 0) throw new BadRequestException(`企业微信菜单发布失败，错误码 ${result.errcode ?? response.status}`)
+  const result = (await response.json().catch(() => ({ errcode: response.status }))) as { errcode?: number; errmsg?: string }
+  if (!response.ok || result.errcode !== 0) {
+    console.warn(`[企业微信] 菜单发布失败：${result.errcode} ${result.errmsg || ''}`)
+    throw new BadRequestException(wecomError('企业微信菜单发布失败', result))
+  }
   const published = { draft, publishedAt: new Date().toISOString(), agentId: config.agentId }
   await db.systemConfig.upsert({ where: { key: 'wecom:menu:published' }, create: { key: 'wecom:menu:published', value: json(published) }, update: { value: json(published) } })
   await audit(actor, '发布企业微信应用菜单', 'wecom-primary', trace)

@@ -2,7 +2,7 @@ import { createHash, createDecipheriv, timingSafeEqual } from 'node:crypto'
 import { XMLParser } from 'fast-xml-parser'
 import { BadRequestException, UnauthorizedException } from '@nestjs/common'
 import { db, dateText } from './database'
-import { readConfig, wecomToken, wecomUrl, type Config } from './integrations'
+import { readConfig, wecomToken, wecomUrl, wecomError, type Config } from './integrations'
 import { convert } from './business'
 import { menuCommand } from './wecom-menu'
 import { listPlatforms } from './platforms/registry'
@@ -89,7 +89,7 @@ async function send(c: Config, user: string, content: string) {
   })
   const data = (await r.json()) as any
   if (!r.ok || data.errcode !== 0 || data.invaliduser)
-    throw new Error(`WECOM_SEND_${Number(data.errcode) || 'INVALID_USER'}`)
+    throw new Error(data.invaliduser ? `接收人无效：${data.invaliduser}` : wecomError('消息发送失败', data))
 }
 let running = false
 export async function processInbox() {
