@@ -155,6 +155,9 @@ export async function testConnection(kind: Provider, actor: string, trace: strin
     } else {
       await wecomToken(await readConfig('wecom'))
       message = '企业微信 access_token 获取成功；回调和收信范围需单独验证'
+      const { autoPublishMenu } = await import('./wecom-menu')
+      const menu = await autoPublishMenu(actor, trace)
+      if (menu) message += `。${menu}`
     }
   } catch (e) {
     status = 'FAILED'

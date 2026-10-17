@@ -73,3 +73,15 @@ export async function publishMenu(value: unknown, actor: string, trace: string) 
   await audit(actor, '发布企业微信应用菜单', 'wecom-primary', trace)
   return getMenu()
 }
+
+// 首次连接测试成功且从未发布过菜单时，自动发布当前草稿（默认菜单）
+export async function autoPublishMenu(actor: string, trace: string) {
+  if (await db.systemConfig.findUnique({ where: { key: 'wecom:menu:published' } })) return null
+  const menu = await getMenu()
+  try {
+    await publishMenu(menu.draft, actor, trace)
+    return '已自动发布默认应用菜单，重新进入企业微信应用即可看到'
+  } catch (e) {
+    return `应用菜单自动发布失败：${e instanceof Error ? e.message : e}，可在下方「应用菜单」手动发布`
+  }
+}
