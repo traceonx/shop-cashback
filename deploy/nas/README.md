@@ -1,6 +1,6 @@
 # Docker / NAS 部署
 
-与 tg-vault 一样使用 Compose、数据卷、自动重启和日志轮转。此项目分为前端、API、PostgreSQL 三个容器，只有前端端口对宿主机开放。默认使用 8081，避免与 tg-vault 的 8080 冲突。
+与 tg-vault 一样使用 Compose、数据卷、自动重启和日志轮转。此项目分为应用（API + 管理后台单镜像）与 PostgreSQL 两个容器，只有应用端口对宿主机开放。默认使用 8081，避免与 tg-vault 的 8080 冲突。
 
 ## 构建并传输镜像
 
@@ -8,7 +8,7 @@
 
 ```sh
 docker compose build
-docker save -o shop-cashback-images.tar shop-cashback-server:local shop-cashback-admin:local
+docker save -o shop-cashback-images.tar shop-cashback:local
 ```
 
 把镜像包及本目录的 `compose.yaml`、`.env.example` 复制到 NAS 的独立项目目录。构建机与 NAS 的 CPU 架构需一致；跨架构构建需指定对应平台并另行验证。
@@ -20,7 +20,7 @@ docker load -i shop-cashback-images.tar
 cp .env.example .env
 ```
 
-填写 `.env` 中三个基础密钥：数据库密码可使用 `openssl rand -hex 24`，JWT 密钥可使用 `openssl rand -hex 48`，加密密钥使用 `openssl rand -hex 32`。不要在更新时重新生成。也可将镜像上传到自己的仓库，修改 `SERVER_IMAGE` / `ADMIN_IMAGE` 为版本标签后拉取。
+填写 `.env` 中三个基础密钥：数据库密码可使用 `openssl rand -hex 24`，JWT 密钥可使用 `openssl rand -hex 48`，加密密钥使用 `openssl rand -hex 32`。不要在更新时重新生成。推荐直接使用 GitHub Actions 发布的 `docker.io/sunqz/shop-cashback`（amd64 / arm64），在 `APP_IMAGE` 中填写版本标签后 `docker compose pull`，无需手动构建传输；本机导入镜像时将 `APP_IMAGE` 设为 `shop-cashback:local`。
 
 ```sh
 docker compose up -d --wait

@@ -5,42 +5,23 @@ x-logging: &logging
     max-size: "10m"
     max-file: "3"
 services:
-  server:
-    image: ${SERVER_IMAGE:-shop-cashback-server:local}
+  app:
+    image: ${APP_IMAGE:-shop-cashback:local}
     logging: *logging
     stop_grace_period: 30s
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-      target: server
     environment:
+      TZ: Asia/Shanghai
       DATABASE_URL: postgresql://rebate:${POSTGRES_PASSWORD}@postgres:5432/rebate
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
       CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?Set CONFIG_ENCRYPTION_KEY}
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8081}:3001"
     depends_on:
       postgres:
         condition: service_healthy
-    restart: unless-stopped
-  admin:
-    image: ${ADMIN_IMAGE:-shop-cashback-admin:local}
-    logging: *logging
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-      target: admin
-    depends_on:
-      server:
-        condition: service_healthy
-    restart: unless-stopped
-  caddy:
-    logging: *logging
-    image: caddy:2-alpine
-    ports:
-      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8081}:80"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-    depends_on:
-      - admin
     restart: unless-stopped
   postgres:
     logging: *logging

@@ -1,0 +1,60 @@
+# 拾惠返利 · 生产部署（从 Docker Hub 拉取 GitHub Actions 构建的镜像，支持 amd64 / arm64；单镜像包含 API 与管理后台）
+#
+# 用法：把本文件复制到服务器任意目录，同目录新建 .env，内容如下：
+#
+#   DOCKER_USERNAME=sunqz            # 可省略，默认 sunqz
+#   IMAGE_TAG=latest                 # 建议固定为 sha-xxxxxxx，便于回滚
+#   WEB_PORT=8081
+#   POSTGRES_PASSWORD=               # openssl rand -hex 24
+#   JWT_SECRET=                      # openssl rand -hex 48
+#   CONFIG_ENCRYPTION_KEY=           # openssl rand -hex 32（与数据库一起备份，切勿更换）
+#
+# 启动：  docker compose pull && docker compose up -d --wait
+# 更新：  先备份，再执行上面同一条命令
+# 备份：  docker compose exec -T postgres pg_dump -U rebate -d rebate -Fc > rebate.dump
+# 注意：  不要执行 docker compose down -v，会删除数据库卷
+
+name: shop-cashback
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  app:
+    image: docker.io/${DOCKER_USERNAME:-sunqz}/shop-cashback:${IMAGE_TAG:-latest}
+    environment:
+      TZ: Asia/Shanghai
+      DATABASE_URL: postgresql://rebate:${POSTGRES_PASSWORD}@postgres:5432/rebate
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET（至少 32 字符）}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?请在 .env 中设置 CONFIG_ENCRYPTION_KEY（64 位十六进制）}
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8081}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *logging
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      TZ: Asia/Shanghai
+      POSTGRES_DB: rebate
+      POSTGRES_USER: rebate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U rebate -d rebate"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  postgres_data:

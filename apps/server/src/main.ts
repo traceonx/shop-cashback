@@ -29,7 +29,9 @@ import {
 } from '@nestjs/common'
 import { SwaggerModule, DocumentBuilder, ApiBearerAuth } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
-import { text } from 'express'
+import { text, static as serveStatic } from 'express'
+import { existsSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import jwt from 'jsonwebtoken'
 import { randomUUID } from 'node:crypto'
 import helmet from 'helmet'
@@ -426,7 +428,30 @@ class AppModule {}
 async function bootstrap() {
   await db.$connect()
   const app = await NestFactory.create(AppModule)
-  app.use(helmet())
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        // 商品图片来自京东等平台 CDN，需允许 HTTPS 图片。
+        directives: { imgSrc: ["'self'", 'data:', 'https:'] },
+      },
+    }),
+  )
+  // 单镜像部署：同一进程提供后台静态页面；/api 之外的 GET 请求回退到 index.html。
+  const adminDist = env.ADMIN_DIST || resolve(__dirname, '../../admin/dist')
+  if (existsSync(join(adminDist, 'index.html'))) {
+    app.use(
+      serveStatic(adminDist, {
+        index: false,
+        setHeaders: (res, file) =>
+          res.setHeader('Cache-Control', file.startsWith(join(adminDist, 'assets')) ? 'public, max-age=31536000, immutable' : 'no-cache'),
+      }),
+    )
+    app.use((req: Request, res: Response, next: () => void) => {
+      if ((req.method !== 'GET' && req.method !== 'HEAD') || req.path === '/api' || req.path.startsWith('/api/')) return next()
+      res.setHeader('Cache-Control', 'no-cache')
+      res.sendFile(join(adminDist, 'index.html'))
+    })
+  }
   app.use('/api/v1/callbacks/wecom', text({ type: ['text/xml', 'application/xml'], limit: '64kb' }))
   const buckets = new Map<string, { count: number; until: number }>()
   app.use((req: AuthRequest, res: Response, next: () => void) => {

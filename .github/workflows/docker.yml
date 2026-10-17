@@ -1,13 +1,19 @@
 name: Docker 镜像
 
-# 推送到 main 或打 v* 标签时构建 linux/amd64 + linux/arm64 镜像并推送到 Docker Hub。
-# 需要在 GitHub 仓库 Settings → Secrets and variables → Actions 中配置：
-#   Secrets:   DOCKER_USERNAME     Docker Hub 用户名
-#   Secrets:   DOCKER_PASSWORD     Docker Hub Access Token（Read & Write）或密码
+# 单镜像 docker.io/sunqz/shop-cashback（API + 管理后台）。
+# 流程：verify（类型检查 + 单元测试 + 数据库集成测试）
+#    → build （amd64 / arm64 分别在原生 runner 上构建，按 digest 推送，不打标签）
+#    → push  （合并为多架构镜像并发布 latest / sha-xxx / 版本号标签）
+# pull_request 只执行 verify 和 build（不登录、不推送）。
+#
+# 仓库 Settings → Secrets and variables → Actions → Secrets：
+#   DOCKER_USERNAME  Docker Hub 用户名
+#   DOCKER_PASSWORD  Docker Hub Access Token（Read & Write）或密码
 on:
   push:
     branches: [main]
     tags: ['v*']
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -18,26 +24,128 @@ permissions:
   contents: read
 
 env:
-  PLATFORMS: linux/amd64,linux/arm64
+  IMAGE: docker.io/sunqz/shop-cashback
+  PUBLISH: ${{ github.event_name != 'pull_request' }}
 
 jobs:
-  build:
+  verify:
+    name: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: rebate
+          POSTGRES_USER: rebate
+          POSTGRES_PASSWORD: rebate
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U rebate -d rebate"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://rebate:rebate@127.0.0.1:5432/rebate
     steps:
       - uses: actions/checkout@v4
 
-      - name: 检查 Docker Hub 配置
-        env:
-          USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          TOKEN: ${{ secrets.DOCKER_PASSWORD }}
-        run: |
-          if [ -z "$USERNAME" ] || [ -z "$TOKEN" ]; then
-            echo "::error::请在仓库 Secrets 中添加 DOCKER_USERNAME 和 DOCKER_PASSWORD"
-            exit 1
-          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
 
-      - uses: docker/setup-qemu-action@v3
+      - name: 生成测试密钥
+        run: |
+          echo "JWT_SECRET=$(openssl rand -hex 48)" >> "$GITHUB_ENV"
+          echo "CONFIG_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: Prisma 校验与生成
+        run: |
+          npm run db:validate
+          npx prisma generate
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 单元测试
+        run: npm test
+
+      - name: 生产构建
+        run: npm run build
+
+      - name: 数据库集成测试
+        run: node scripts/smoke.mjs
+
+  build:
+    name: build (${{ matrix.arch }})
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 Docker Hub
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: 构建镜像
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ env.PUBLISH }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.arch }},mode=max
+
+      - name: 记录 digest
+        if: env.PUBLISH == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: env.PUBLISH == 'true'
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  push:
+    name: push
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -45,60 +153,31 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: 生成 server 镜像标签
-        id: server-meta
+      - name: 生成标签
+        id: meta
         uses: docker/metadata-action@v5
         with:
-          images: docker.io/${{ secrets.DOCKER_USERNAME }}/shop-cashback-server
+          images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      - name: 生成 admin 镜像标签
-        id: admin-meta
-        uses: docker/metadata-action@v5
-        with:
-          images: docker.io/${{ secrets.DOCKER_USERNAME }}/shop-cashback-admin
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-
-      # 两个 target 共用同一个 build 阶段；同一 job 内第二次构建直接复用缓存。
-      - name: 构建并推送 server
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/Dockerfile
-          target: server
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          tags: ${{ steps.server-meta.outputs.tags }}
-          labels: ${{ steps.server-meta.outputs.labels }}
-          cache-from: type=gha,scope=shop-cashback
-          cache-to: type=gha,scope=shop-cashback,mode=max
-
-      - name: 构建并推送 admin
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/Dockerfile
-          target: admin
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          tags: ${{ steps.admin-meta.outputs.tags }}
-          labels: ${{ steps.admin-meta.outputs.labels }}
-          cache-from: type=gha,scope=shop-cashback
-
-      - name: 输出镜像
+      - name: 合并多架构镜像并推送标签
+        working-directory: ${{ runner.temp }}/digests
         run: |
+          test "$(ls | wc -l)" -eq 2 || { echo "::error::应有 amd64 和 arm64 两个 digest"; exit 1; }
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "$IMAGE@sha256:%s " *)
+
+      - name: 检查结果
+        run: |
+          docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
           {
-            echo "### 已推送镜像"
+            echo "### $IMAGE"
             echo '```'
-            echo "${{ steps.server-meta.outputs.tags }}"
-            echo "${{ steps.admin-meta.outputs.tags }}"
+            echo "${{ steps.meta.outputs.tags }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
