@@ -206,7 +206,8 @@ async function runUpdate(container: string) {
     Image: watchtowerImage,
     Cmd: ['--run-once', '--cleanup', container],
     Tty: true,
-    Env: [`DOCKER_API_VERSION=${apiPrefix.slice(2)}`],
+    // 国内网络直连 index.docker.io 常超时，watchtower 会自动改用守护进程拉取（走镜像加速），无需告警
+    Env: [`DOCKER_API_VERSION=${apiPrefix.slice(2)}`, 'WATCHTOWER_WARN_ON_HEAD_FAILURE=never'],
     HostConfig: { AutoRemove: true, Binds: [`${socketPath}:/var/run/docker.sock`] },
   })
   if (created.status !== 201) throw new Error(`创建更新容器失败：HTTP ${created.status} ${created.text}`)
