@@ -7,6 +7,8 @@ import { decrypt, encrypt } from './security'
 export const fields = {
   ...Object.fromEntries(listPlatforms().map((p) => [p.id, p.fields])),
   wecom: [
+    ['name', '名称', false],
+    ['enabled', '启用', false],
     ['corpId', 'CorpID', false],
     ['agentId', 'AgentID', false],
     ['secret', '应用 Secret', true],
@@ -61,6 +63,8 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
   }
   if (kind === 'wecom' && next.aesKey && !/^[A-Za-z0-9+/]{43}$/.test(next.aesKey))
     throw new BadRequestException('EncodingAESKey 必须为 43 位 Base64 字符')
+  if (kind === 'wecom' && next.enabled && !['true', 'false'].includes(next.enabled))
+    throw new BadRequestException('启用状态无效')
   if (kind === 'wecom' && next.proxy && !/^https?:\/\/[^\s/]+/i.test(next.proxy))
     throw new BadRequestException('代理地址需以 http:// 或 https:// 开头')
   if (kind === 'wecom' && next.agentId && !/^\d+$/.test(next.agentId))

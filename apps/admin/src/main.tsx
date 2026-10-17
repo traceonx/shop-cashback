@@ -54,6 +54,7 @@ import { api, money, type Row } from './api'
 import './styles.css'
 import { WecomMenu } from './WecomMenu'
 import { SystemUpdate } from './SystemUpdate'
+import { WecomConfig } from './WecomConfig'
 
 const navigation: [string, string, LucideIcon][] = [
   ['/', '数据概览', LayoutDashboard],
@@ -1692,6 +1693,7 @@ function Integration({ kind, compact = false }: { kind: 'wecom' | 'jd' | 'taobao
   const [visible, setVisible] = useState<Record<string, boolean>>({})
   async function openDetails() {
     setOpened(true)
+    if (kind === 'wecom') return
     setLoading(true)
     setError('')
     try {
@@ -1771,12 +1773,13 @@ function Integration({ kind, compact = false }: { kind: 'wecom' | 'jd' | 'taobao
       {!opened && error && <ErrorBox message={error} />}
       <div className="provider-cards">
         <button className={'provider-tile ' + kind} onClick={openDetails} disabled={loading}>
-          <span className="provider-tile-top"><span className={'provider-dot ' + (data?.test?.status === 'CONNECTED' ? 'connected' : '')} />{kind === 'wecom' ? '通知1' : platformName}<ChevronRight size={18} /></span>
+          <span className="provider-tile-top"><span className={'provider-dot ' + (data?.test?.status === 'CONNECTED' ? 'connected' : '')} />{kind === 'wecom' ? data?.fields.find((f) => f.key === 'name')?.value || '企业微信' : platformName}<ChevronRight size={18} /></span>
           <span className="provider-tile-bottom"><span>{kind === 'wecom' ? '企业微信' : platformName}<small>{loading ? '读取中' : configStatus}</small></span><span className={'service-logo ' + kind}>{platformLogo}</span></span>
           <span className="provider-tile-link">配置详情</span>
         </button>
       </div>
-      {opened && <Modal title="配置详情" onClose={closeDetails} wide>
+      {opened && kind === 'wecom' && <WecomConfig onClose={closeDetails} />}
+      {opened && kind !== 'wecom' && <Modal title="配置详情" onClose={closeDetails} wide>
       <div className="integration-grid">
         <form className="panel integration-card" onSubmit={save}>
           <div className="integration-header">
@@ -1845,17 +1848,6 @@ function Integration({ kind, compact = false }: { kind: 'wecom' | 'jd' | 'taobao
                     </div>
                   </section>)}
                 </div>
-                {kind === 'wecom' && (
-                  <div className="info-box">
-                    <Link2 size={18} />
-                    <span>
-                      回调路径：{data.callbackPath}
-                      <br />
-                      在企业微信填写你的公网 HTTPS 域名 +
-                      此路径。连接测试仅验证应用凭证，回调需在企业微信后台单独保存验证。
-                    </span>
-                  </div>
-                )}
                 {data.test && (
                   <p className="connection-result">
                     上次测试：{new Date(data.test.checkedAt).toLocaleString('zh-CN')}

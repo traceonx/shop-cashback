@@ -51,6 +51,7 @@ export async function receiveCallback(query: Record<string, string>, body: strin
   const msg = xmlObject(plain)
   if (msg.ToUserName !== c.corpId || String(msg.AgentID) !== c.agentId)
     throw new UnauthorizedException('回调应用不匹配')
+  if (c.enabled === 'false') return // 渠道已停用：验签通过但不处理消息
   const event = msg.MsgType === 'event' && String(msg.Event).toLowerCase() === 'click'
   if (msg.MsgType !== 'text' && !event) return
   const content = event ? menuCommand(String(msg.EventKey || '')) : String(msg.Content || '')
