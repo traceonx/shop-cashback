@@ -256,7 +256,7 @@ function App() {
             </nav>
             <div className="sidebar-bottom">
               <div className="sidebar-foot">
-                <span className="health-dot" /> JD Rebate <span>v0.1.0</span>
+                <span className="health-dot" /> JD Rebate <span title={`提交 ${__GIT_SHA__}`}>v{__APP_VERSION__}</span>
               </div>
             </div>
           </aside>

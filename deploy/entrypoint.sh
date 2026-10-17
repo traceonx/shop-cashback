@@ -1,6 +1,7 @@
 #!/bin/sh
 # 单容器启动：未提供 DATABASE_URL 时使用镜像内置 PostgreSQL（数据在 $DATA_DIR/postgres，仅容器内 127.0.0.1 可访问）。
 set -e
+echo "拾惠返利 v${APP_VERSION:-$(node -p "require('./package.json').version")}（提交 $(echo "${GIT_SHA:-dev}" | cut -c1-7)${BUILD_TIME:+，构建于 $BUILD_TIME}）"
 DATA_DIR="${DATA_DIR:-/app/data}"
 
 if [ -n "$DATABASE_URL" ]; then

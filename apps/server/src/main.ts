@@ -44,6 +44,7 @@ import { startOrderSync, orderSyncStatus, processOrderSync } from './order-sync'
 import { platform, listPlatforms } from './platforms/registry'
 import { integrationStatus, saveConfig, testConnection, readConfig, type Provider } from './integrations'
 import { decryptCallback, receiveCallback, processInbox } from './wecom'
+import { version as appVersion, versionText } from './version'
 const secret = requireEnv('JWT_SECRET')
 if (secret.length < 32) throw new Error('JWT_SECRET 至少 32 字符')
 type AuthRequest = Request & { actor?: { id: string; role: string; name: string }; traceId?: string }
@@ -100,7 +101,7 @@ class PublicController {
   @Get('health') async health() {
     try {
       await db.$queryRaw`SELECT 1`
-      return { data: { status: 'ok', mode: 'live', persistence: 'postgresql' } }
+      return { data: { status: 'ok', mode: 'live', persistence: 'postgresql', ...appVersion } }
     } catch {
       throw new ServiceUnavailableException('数据库连接不可用')
     }
@@ -426,6 +427,7 @@ function provider(kind: string): Provider {
 @Module({ controllers: [PublicController, AdminController], providers: [AuthGuard] })
 class AppModule {}
 async function bootstrap() {
+  console.log(versionText())
   await db.$connect()
   const app = await NestFactory.create(AppModule)
   app.use(
@@ -482,7 +484,7 @@ async function bootstrap() {
     app,
     SwaggerModule.createDocument(
       app,
-      new DocumentBuilder().setTitle('拾惠返利 API').setVersion('0.2.0').addBearerAuth().build(),
+      new DocumentBuilder().setTitle('拾惠返利 API').setVersion(appVersion.version).addBearerAuth().build(),
     ),
   )
   await app.listen(Number(env.PORT || 3001), env.HOST || '127.0.0.1')
