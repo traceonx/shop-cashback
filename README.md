@@ -12,20 +12,15 @@ React / TypeScript 管理后台，NestJS API，Prisma / PostgreSQL 持久存储�
 4. 保存新配置后，旧测试结果清除。测试成功仅说明被测试的接口通过，不代表全部权限或回调可用。
 5. **订单管理**：独立展示商品信息、来源、金额、付款金额、预计返现、返现比例、下单时间、完成时间、订单号、状态。时间为北京时间，精确到秒。支持已完成 / 待付款 / 已取消筛选，未知状态保持待核实；已付款不冒充待付款或已完成。
 
-## 首次启动
+## 本地开发
 
-推荐 Node.js 22.12+ 与 Docker Desktop。
+推荐 Node.js 22.12+ 与 Docker Desktop。先启动 Docker Desktop，然后只需一条命令：
 
 ```sh
-npm ci
-node scripts/init-local.mjs
-docker compose --env-file .env -f deploy/local-db.yml up -d --wait
-npx prisma generate
-npx prisma migrate deploy
 npm run dev
 ```
 
-`init-local` 仅在没有 `.env` 时创建随机密钥，不覆盖已有配置。PostgreSQL 仅暴露本机 `127.0.0.1:54329`，数据存入专用 Docker 卷。停止后重新运行 `npm run dev` 即可；数据库容器需保持运行。
+它会依次完成：首次安装依赖 → 首次生成 `.env`（随机密钥，不覆盖已有配置）→ 启动本地 PostgreSQL 容器（仅暴露 `127.0.0.1:54329`，数据存入专用 Docker 卷）→ Prisma 生成与迁移 → 同时启动 API（3001）和后台（5173，热更新）。`Ctrl+C` 停止前后端，数据库容器继续在后台运行；`npm run db:stop` 停止数据库（数据保留）。只想单独启动前后端可用 `npm run dev:apps`。
 
 API 健康检查：<http://127.0.0.1:3001/api/v1/health>，Swagger：<http://127.0.0.1:3001/api/docs>。
 
