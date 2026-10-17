@@ -5,6 +5,11 @@
 
 规则：修复 / 小调整升 patch（0.3.0 → 0.3.1）；新功能或部署方式变化升 minor（0.3.x → 0.4.0）。
 
+## 0.5.2 · 2026-10-18
+
+- 修复一键更新在部分 NAS（如飞牛）上“找不到当前容器”：依次通过 UPDATE_CONTAINER、/proc/self/mountinfo 中的完整容器 ID、主机名、唯一运行本镜像的容器来识别自身。
+- 部署 compose 增加 `container_name` 与 `UPDATE_CONTAINER`。
+
 ## 0.5.1 · 2026-10-18
 
 - 版本检查不再只依赖 hub.docker.com（国内常无法访问）：改由本机 Docker 守护进程比对远程镜像摘要判断是否有新镜像，Docker Hub 可访问时同时显示最新版本号。

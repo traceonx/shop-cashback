@@ -78,12 +78,34 @@ async function api(method: string, path: string, body?: unknown, timeout?: numbe
   return docker(method, apiPrefix + path, body, timeout)
 }
 
-async function self() {
-  const ref = process.env.UPDATE_CONTAINER || hostname()
+// 识别当前容器：UPDATE_CONTAINER → /proc/self/mountinfo 中的完整容器 ID → 主机名 → 唯一运行本镜像的容器
+function containerIdFromMounts() {
+  try {
+    return /\/containers\/([0-9a-f]{64})\//.exec(readFileSync('/proc/self/mountinfo', 'utf8'))?.[1]
+  } catch {
+    return undefined
+  }
+}
+async function inspect(ref: string) {
   const r = await api('GET', `/containers/${encodeURIComponent(ref)}/json`)
-  if (r.status !== 200) throw new Error(`找不到当前容器 ${ref}（HTTP ${r.status}），可设置 UPDATE_CONTAINER 为容器名`)
+  if (r.status !== 200) return null
   const info = JSON.parse(r.text) as { Name: string; Config: { Image: string } }
   return { name: info.Name.replace(/^\//, ''), image: info.Config.Image }
+}
+async function self() {
+  if (process.env.UPDATE_CONTAINER) {
+    const found = await inspect(process.env.UPDATE_CONTAINER)
+    if (found) return found
+    throw new Error(`找不到 UPDATE_CONTAINER 指定的容器 ${process.env.UPDATE_CONTAINER}`)
+  }
+  for (const ref of [containerIdFromMounts(), hostname()]) {
+    const found = ref && (await inspect(ref))
+    if (found) return found
+  }
+  const list = await api('GET', '/containers/json')
+  const mine = (JSON.parse(list.text || '[]') as { Names: string[]; Image: string }[]).filter((c) => /(^|\/)shop-cashback(:|@|$)/.test(c.Image))
+  if (mine.length === 1) return { name: mine[0].Names[0].replace(/^\//, ''), image: mine[0].Image }
+  throw new Error(`无法识别当前容器（主机名 ${hostname()}${mine.length > 1 ? `，发现 ${mine.length} 个本项目容器` : ''}），请在 compose 中设置 UPDATE_CONTAINER 为容器名`)
 }
 const repository = (image: string) => image.replace(/^docker\.io\//, '').replace(/@.*$/, '').replace(/:[^/]+$/, '')
 const tagOf = (image: string) => (/:([^/]+)$/.exec(image.replace(/@.*$/, ''))?.[1] || 'latest')
