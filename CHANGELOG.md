@@ -5,6 +5,10 @@
 
 规则：修复 / 小调整升 patch（0.3.0 → 0.3.1）；新功能或部署方式变化升 minor（0.3.x → 0.4.0）。
 
+## 0.4.4 · 2026-10-17
+
+- 自动推送日志改为 UTF-8，修复中文提交信息乱码；新增 `scripts/install-auto-push.cmd`，双击即可安装。
+
 ## 0.4.3 · 2026-10-17
 
 - 新增 Windows 后台自动推送脚本 `scripts/install-auto-push.ps1`：本地有未推送提交时自动 `git push`（每 30 秒检查，日志在 data/auto-push.log）。

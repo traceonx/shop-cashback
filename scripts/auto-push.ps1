@@ -1,6 +1,8 @@
 ﻿# 后台自动推送：本地 main 领先 origin/main 时执行 git push（使用本机已保存的 GitHub 登录凭证）
 # 日志：data\auto-push.log
 param([int]$Interval = 30)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 $repo = Split-Path $PSScriptRoot -Parent
 Set-Location $repo
 New-Item -ItemType Directory -Force (Join-Path $repo 'data') | Out-Null
