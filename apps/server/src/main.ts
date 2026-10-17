@@ -430,9 +430,15 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule)
   app.use(
     helmet({
+      // 未配置 HTTPS 时 HSTS 无意义，并会让同域名后续访问被强制跳转 https。
+      strictTransportSecurity: false,
       contentSecurityPolicy: {
-        // 商品图片来自京东等平台 CDN，需允许 HTTPS 图片。
-        directives: { imgSrc: ["'self'", 'data:', 'https:'] },
+        directives: {
+          // 商品图片来自京东等平台 CDN，需允许 HTTPS 图片。
+          imgSrc: ["'self'", 'data:', 'https:'],
+          // 允许通过 http://IP:端口 直接访问；否则浏览器会把脚本请求强制升级为 https 导致页面空白。
+          upgradeInsecureRequests: null,
+        },
       },
     }),
   )

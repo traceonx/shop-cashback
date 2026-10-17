@@ -1,32 +1,13 @@
-# 把两处 change-me-db 改成同一个数据库密码后执行：docker compose up -d
-# JWT 与配置加密密钥首次启动自动生成，保存在 appdata 卷；备份时连同 pgdata 一起备份
+# 单容器部署：docker compose up -d，然后打开 http://服务器IP:8081
+# 数据库、JWT 与配置加密密钥都保存在 data 卷（/app/data），备份这个卷即可
 services:
   app:
     image: sunqz/shop-cashback:latest
     ports:
       - "8081:3001"
-    environment:
-      DATABASE_URL: postgresql://rebate:change-me-db@postgres:5432/rebate
     volumes:
-      - appdata:/app/data
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: rebate
-      POSTGRES_USER: rebate
-      POSTGRES_PASSWORD: change-me-db
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: pg_isready -U rebate
-      interval: 5s
+      - data:/app/data
     restart: unless-stopped
 
 volumes:
-  appdata:
-  pgdata:
+  data:
