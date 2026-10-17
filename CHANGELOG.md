@@ -5,6 +5,10 @@
 
 规则：修复 / 小调整升 patch（0.3.0 → 0.3.1）；新功能或部署方式变化升 minor（0.3.x → 0.4.0）。
 
+## 0.4.3 · 2026-10-17
+
+- 新增 Windows 后台自动推送脚本 `scripts/install-auto-push.ps1`：本地有未推送提交时自动 `git push`（每 30 秒检查，日志在 data/auto-push.log）。
+
 ## 0.4.2 · 2026-10-17
 
 - 修复 NAS 共享目录（继承 ACL）作为 ./data 时内置数据库报 “data directory has invalid permissions” 并反复重启：启动时清除 ACL 并把数据库目录设为 0700；文件系统不允许时输出中文原因与解决办法。
