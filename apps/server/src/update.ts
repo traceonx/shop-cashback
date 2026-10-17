@@ -124,14 +124,39 @@ async function dockerStatus() {
   }
 }
 
+// 通过本机 Docker 守护进程比对远程镜像摘要：走守护进程已配置的镜像加速 / 代理，不依赖 hub.docker.com 网页接口
+let digestCache: { at: number; image: string; changed: boolean | null; error?: string } | null = null
+async function remoteImageChanged(image: string) {
+  if (digestCache && digestCache.image === image && Date.now() - digestCache.at < 10 * 60000) return digestCache
+  try {
+    const local = await api('GET', `/images/${encodeURIComponent(image)}/json`)
+    if (local.status !== 200) throw new Error(`读取本地镜像失败：HTTP ${local.status}`)
+    const digests = ((JSON.parse(local.text) as { RepoDigests?: string[] }).RepoDigests || []).map((d) => d.split('@')[1])
+    const remote = await api('GET', `/distribution/${image.split('/').map(encodeURIComponent).join('/')}/json`, undefined, 20000)
+    if (remote.status !== 200) throw new Error(`查询远程镜像失败：HTTP ${remote.status}`)
+    const digest = (JSON.parse(remote.text) as { Descriptor?: { digest?: string } }).Descriptor?.digest
+    if (!digest) throw new Error('远程镜像摘要为空')
+    digestCache = { at: Date.now(), image, changed: !digests.includes(digest) }
+  } catch (e) {
+    digestCache = { at: Date.now(), image, changed: null, error: e instanceof Error ? e.message : '查询失败' }
+  }
+  return digestCache
+}
+
 export async function updateStatus() {
   const docker = await dockerStatus()
-  const latest = await latestVersion(repository(('image' in docker && docker.image) || 'sunqz/shop-cashback'))
+  const image = ('image' in docker && docker.image) || 'sunqz/shop-cashback:latest'
+  const [latest, remote] = await Promise.all([
+    latestVersion(repository(image)),
+    docker.available ? remoteImageChanged(image) : Promise.resolve(null),
+  ])
   return {
     current: appVersion,
     latest: latest.version,
-    latestError: latest.error || null,
-    hasUpdate: !!latest.version && newer(latest.version, appVersion.version),
+    latestError: latest.error ? `无法访问 Docker Hub（${latest.error}）` : null,
+    imageChanged: remote?.changed ?? null,
+    imageError: remote?.error || null,
+    hasUpdate: (!!latest.version && newer(latest.version, appVersion.version)) || remote?.changed === true,
     docker,
     state,
   }

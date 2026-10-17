@@ -6,6 +6,8 @@ type Status = {
   current: Version
   latest: string | null
   latestError: string | null
+  imageChanged: boolean | null
+  imageError: string | null
   hasUpdate: boolean
   docker: { available: boolean; reason: string; name?: string; image?: string }
   state: { running: boolean; fromVersion?: string; startedAt?: string; finishedAt?: string; success?: boolean | null; message?: string; log?: string }
@@ -74,7 +76,14 @@ export function SystemUpdate() {
           <tr>
             <th>最新版本</th>
             <td>
-              {latest ? <>v{latest} {status.hasUpdate ? <span className="badge purple">有新版本</span> : <span className="badge green">已是最新</span>}</> : <span className="muted">无法获取{status.latestError ? `（${status.latestError}）` : ''}</span>}
+              {latest ? <>v{latest} </> : null}
+              {status.hasUpdate ? (
+                <span className="badge purple">{latest ? '有新版本' : '镜像仓库有新镜像'}</span>
+              ) : status.imageChanged === false || latest ? (
+                <span className="badge green">已是最新</span>
+              ) : (
+                <span className="muted">无法获取（{status.imageError || status.latestError || '未知原因'}）</span>
+              )}
             </td>
           </tr>
           <tr><th>运行镜像</th><td>{docker.image || '—'}{docker.name ? `（容器 ${docker.name}）` : ''}</td></tr>
@@ -91,7 +100,7 @@ export function SystemUpdate() {
       ) : null}
       {state.log && !running && <pre className="update-log">{state.log}</pre>}
       <button className="primary" disabled={!docker.available || running || busy} onClick={start}>
-        {running ? '更新中…' : status.hasUpdate ? `更新到 v${latest}` : '检查并更新'}
+        {running ? '更新中…' : status.hasUpdate ? (latest ? `更新到 v${latest}` : '立即更新') : '检查并更新'}
       </button>
     </div>
   )
