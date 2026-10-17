@@ -1,5 +1,5 @@
-# 修改下面三个 change-me 后执行：docker compose up -d
-# 密钥生成：openssl rand -hex 32；CONFIG_ENCRYPTION_KEY 必须是 64 位十六进制，生成后不要更换
+# 把两处 change-me-db 改成同一个数据库密码后执行：docker compose up -d
+# JWT 与配置加密密钥首次启动自动生成，保存在 appdata 卷；备份时连同 pgdata 一起备份
 services:
   app:
     image: sunqz/shop-cashback:latest
@@ -7,8 +7,8 @@ services:
       - "8081:3001"
     environment:
       DATABASE_URL: postgresql://rebate:change-me-db@postgres:5432/rebate
-      JWT_SECRET: change-me-至少32位的随机字符串
-      CONFIG_ENCRYPTION_KEY: change-me-64位十六进制
+    volumes:
+      - appdata:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -28,4 +28,5 @@ services:
     restart: unless-stopped
 
 volumes:
+  appdata:
   pgdata:

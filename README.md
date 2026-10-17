@@ -53,7 +53,7 @@ npm run test:api
 docker compose up --build -d --wait
 ```
 
-前端与 API 打包为单个镜像（NestJS 同时提供后台页面），独立容器栈入口绑定本机 8081，数据库不暴露端口。容器使用自己的 PostgreSQL 数据卷，不与本机开发栈共享。部署至公网前配置 TLS。备份 PostgreSQL 和 `CONFIG_ENCRYPTION_KEY`；丢失加密主密钥将无法读取已保存的平台凭证。NAS 镜像导入、部署、更新与备份步骤见 [NAS 部署说明](deploy/nas/README.md)。NAS 默认端口 8081，避免与 tg-vault 冲突。推送到 main 时 GitHub Actions 依次执行 verify → build（amd64 / arm64 原生构建）→ push，发布 `sunqz/shop-cashback` 多架构镜像；服务器可直接使用 [deploy/docker-compose.yml](deploy/docker-compose.yml) 拉取部署。
+前端与 API 打包为单个镜像（NestJS 同时提供后台页面），独立容器栈入口绑定本机 8081，数据库不暴露端口。容器使用自己的 PostgreSQL 数据卷，不与本机开发栈共享。部署至公网前配置 TLS。`JWT_SECRET` 与 `CONFIG_ENCRYPTION_KEY` 可不配置，首次启动自动生成并保存在 `/app/data/secrets.json`（`appdata` 卷）。备份 PostgreSQL 和该卷（或 `CONFIG_ENCRYPTION_KEY`）；丢失加密主密钥将无法读取已保存的平台凭证。NAS 镜像导入、部署、更新与备份步骤见 [NAS 部署说明](deploy/nas/README.md)。NAS 默认端口 8081，避免与 tg-vault 冲突。推送到 main 时 GitHub Actions 依次执行 verify → build（amd64 / arm64 原生构建）→ push，发布 `sunqz/shop-cashback` 多架构镜像；服务器可直接使用 [deploy/docker-compose.yml](deploy/docker-compose.yml) 拉取部署。
 
 架构与 API 见 [说明](docs/architecture.md)，测试范围见 [验证记录](docs/verification.md)。
 
