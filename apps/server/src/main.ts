@@ -174,25 +174,41 @@ class PublicController {
       },
     }
   }
-  @Get('callbacks/wecom') async verify(@Query() q: Record<string, string>, @Res() res: Response) {
-    const output = decryptCallback(
-      await readConfig('wecom'),
-      q.msg_signature || '',
-      q.timestamp || '',
-      q.nonce || '',
-      q.echostr || '',
-    )
-    res.type('text/plain').send(output)
+  @Get('callbacks/wecom') async verify(@Req() req: AuthRequest, @Res() res: Response) {
+    const q = rawQuery(req.originalUrl)
+    try {
+      const output = decryptCallback(await readConfig('wecom'), q.msg_signature || '', q.timestamp || '', q.nonce || '', q.echostr || '')
+      console.log('[企业微信] 回调 URL 验证成功')
+      res.type('text/plain').send(output)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : '验证失败'
+      console.warn(`[企业微信] 回调 URL 验证失败：${message}（参数：${['msg_signature', 'timestamp', 'nonce', 'echostr'].filter((k) => q[k]).join(',') || '无'}）`)
+      res.status(e instanceof HttpException ? e.getStatus() : 500).type('text/plain').send(message)
+    }
   }
-  @Post('callbacks/wecom') async callback(
-    @Query() q: Record<string, string>,
-    @Body() body: unknown,
-    @Res() res: Response,
-  ) {
-    if (typeof body !== 'string') throw new BadRequestException('需要 XML 消息体')
-    await receiveCallback(q, body)
-    res.type('text/plain').send('success')
+  @Post('callbacks/wecom') async callback(@Req() req: AuthRequest, @Body() body: unknown, @Res() res: Response) {
+    try {
+      if (typeof body !== 'string') throw new BadRequestException('需要 XML 消息体')
+      await receiveCallback(rawQuery(req.originalUrl), body)
+      res.type('text/plain').send('success')
+    } catch (e) {
+      const message = e instanceof Error ? e.message : '处理失败'
+      console.warn(`[企业微信] 回调消息处理失败：${message}`)
+      res.status(e instanceof HttpException ? e.getStatus() : 500).type('text/plain').send(message)
+    }
   }
+}
+// 企业微信签名基于原始参数值；不使用会把 “+” 解码成空格的通用查询解析
+function rawQuery(url: string) {
+  const out: Record<string, string> = {}
+  for (const part of (url.split('?')[1] || '').split('&')) {
+    const i = part.indexOf('=')
+    if (i <= 0) continue
+    try {
+      out[decodeURIComponent(part.slice(0, i))] = decodeURIComponent(part.slice(i + 1))
+    } catch {}
+  }
+  return out
 }
 @ApiBearerAuth()
 @UseGuards(AuthGuard)
