@@ -1,8 +1,21 @@
 #!/bin/sh
 # 单容器启动：未提供 DATABASE_URL 时使用镜像内置 PostgreSQL（数据在 $DATA_DIR/postgres，仅容器内 127.0.0.1 可访问）。
 set -e
-echo "拾惠返利 v${APP_VERSION:-$(node -p "require('./package.json').version")}（提交 $(echo "${GIT_SHA:-dev}" | cut -c1-7)${BUILD_TIME:+，构建于 $BUILD_TIME}）"
 DATA_DIR="${DATA_DIR:-/app/data}"
+
+# 以 root 启动时：修正数据目录权限；若挂载了 docker.sock（一键更新），把 node 加入其所属组；然后降权为 node 运行
+if [ "$(id -u)" = "0" ]; then
+  mkdir -p "$DATA_DIR" && chown node:node "$DATA_DIR"
+  sock="${UPDATE_DOCKER_SOCKET:-/var/run/docker.sock}"
+  if [ -S "$sock" ]; then
+    gid=$(stat -c %g "$sock")
+    group=$(getent group "$gid" | cut -d: -f1)
+    if [ -z "$group" ]; then group=dockerhost; addgroup -g "$gid" "$group"; fi
+    addgroup node "$group" 2>/dev/null || true
+  fi
+  exec su-exec node "$0" "$@"
+fi
+echo "拾惠返利 v${APP_VERSION:-$(node -p "require('./package.json').version")}（提交 $(echo "${GIT_SHA:-dev}" | cut -c1-7)${BUILD_TIME:+，构建于 $BUILD_TIME}）"
 
 if [ -n "$DATABASE_URL" ]; then
   node node_modules/prisma/build/index.js migrate deploy

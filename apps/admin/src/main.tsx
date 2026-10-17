@@ -53,6 +53,7 @@ import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tool
 import { api, money, type Row } from './api'
 import './styles.css'
 import { WecomMenu } from './WecomMenu'
+import { SystemUpdate } from './SystemUpdate'
 
 const navigation: [string, string, LucideIcon][] = [
   ['/', '数据概览', LayoutDashboard],
@@ -2035,7 +2036,7 @@ function SystemSettings({ notify }: { notify: (s: string) => void }) {
           {[
             ['rules', '返现与提现规则'],
             ['security', '账户安全'],
-
+            ['update', '版本更新'],
             ['audit', '操作审计'],
           ].map(([value, label]) => (
             <button className={tab === value ? 'active' : ''} key={value} onClick={() => setTab(value)}>
@@ -2047,6 +2048,8 @@ function SystemSettings({ notify }: { notify: (s: string) => void }) {
         <div className="settings-body">
           {tab === 'security' ? (
             <ChangePassword notify={notify} />
+          ) : tab === 'update' ? (
+            <SystemUpdate />
           ) : tab === 'rules' ? (
             <form onSubmit={save}>
               <h2>默认返现规则</h2>

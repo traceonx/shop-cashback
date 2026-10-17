@@ -1,5 +1,6 @@
 # 单容器部署：docker compose up -d，然后打开 http://服务器IP:8081
 # 数据库、JWT 与配置加密密钥都保存在 data 卷（/app/data），备份这个卷即可
+# 后台「系统设置 → 版本更新」可一键更新，需要挂载 docker.sock；不需要可删掉那一行
 services:
   app:
     image: sunqz/shop-cashback:latest
@@ -7,6 +8,7 @@ services:
       - "8081:3001"
     volumes:
       - data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
 volumes:

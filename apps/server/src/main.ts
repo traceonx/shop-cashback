@@ -45,6 +45,7 @@ import { platform, listPlatforms } from './platforms/registry'
 import { integrationStatus, saveConfig, testConnection, readConfig, type Provider } from './integrations'
 import { decryptCallback, receiveCallback, processInbox } from './wecom'
 import { version as appVersion, versionText } from './version'
+import { updateStatus, startUpdate } from './update'
 const secret = requireEnv('JWT_SECRET')
 if (secret.length < 32) throw new Error('JWT_SECRET 至少 32 字符')
 type AuthRequest = Request & { actor?: { id: string; role: string; name: string }; traceId?: string }
@@ -391,6 +392,14 @@ class AdminController {
   }
   @Get('integrations/:kind') async integration(@Param('kind') kind: string) {
     return { data: await integrationStatus(provider(kind)) }
+  }
+  @Get('system/update') async systemUpdate() {
+    return { data: await updateStatus() }
+  }
+  @Post('system/update') async runSystemUpdate(@Req() req: AuthRequest) {
+    const data = await startUpdate()
+    await audit(req.actor!.id, '一键更新', 'system', req.traceId!, { fromVersion: appVersion.version })
+    return { data }
   }
   @Get('wecom/menu') async menu() { return { data: await getMenu() } }
   @Put('wecom/menu') async saveMenu(@Body() body: { draft?: unknown }, @Req() req: AuthRequest) {
