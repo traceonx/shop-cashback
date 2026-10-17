@@ -1,0 +1,470 @@
+import 'reflect-metadata'
+import './config'
+import { NestFactory } from '@nestjs/core'
+import {
+  Module,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Put,
+  Body,
+  Param,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+  ForbiddenException,
+  BadRequestException,
+  NotFoundException,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  ExceptionFilter,
+  ServiceUnavailableException,
+} from '@nestjs/common'
+import { SwaggerModule, DocumentBuilder, ApiBearerAuth } from '@nestjs/swagger'
+import type { Request, Response } from 'express'
+import { text } from 'express'
+import jwt from 'jsonwebtoken'
+import { randomUUID } from 'node:crypto'
+import helmet from 'helmet'
+import { db, audit, centsNumber, dateText } from './database'
+import { getMenu, saveMenu, publishMenu } from './wecom-menu'
+import { env, requireEnv } from './config'
+import { hashPassword, verifyPassword } from './security'
+import * as business from './business'
+import { startOrderSync, orderSyncStatus, processOrderSync } from './order-sync'
+import { platform, listPlatforms } from './platforms/registry'
+import { integrationStatus, saveConfig, testConnection, readConfig, type Provider } from './integrations'
+import { decryptCallback, receiveCallback, processInbox } from './wecom'
+const secret = requireEnv('JWT_SECRET')
+if (secret.length < 32) throw new Error('JWT_SECRET 至少 32 字符')
+type AuthRequest = Request & { actor?: { id: string; role: string; name: string }; traceId?: string }
+const failedLogins = new Map<string, { count: number; until: number }>()
+@Injectable()
+class AuthGuard implements CanActivate {
+  async canActivate(ctx: ExecutionContext) {
+    const req = ctx.switchToHttp().getRequest<AuthRequest>()
+    let id: string
+    let version: number
+    try {
+      const token = jwt.verify(req.headers.authorization?.replace(/^Bearer /, '') || '', secret, {
+        algorithms: ['HS256'],
+        issuer: 'shihui',
+        audience: 'admin',
+      }) as jwt.JwtPayload
+      id = String(token.sub || '')
+      version = token.passwordVersion
+    } catch {
+      throw new UnauthorizedException('登录已失效，请重新登录')
+    }
+    const admin = await db.adminUser.findUnique({ where: { id }, include: { role: true } })
+    if (
+      !admin?.enabled ||
+      admin.passwordVersion !== version ||
+      admin.role.name !== 'SUPER_ADMIN'
+    )
+      throw new UnauthorizedException('账户已禁用或无后台权限')
+    req.actor = { id: admin.id, role: admin.role.name, name: admin.username }
+    return true
+  }
+}
+@Catch()
+class Errors implements ExceptionFilter {
+  catch(error: unknown, host: ArgumentsHost) {
+    const c = host.switchToHttp(),
+      req = c.getRequest<AuthRequest>(),
+      res = c.getResponse<Response>()
+    const status = error instanceof HttpException ? error.getStatus() : 500
+    res.status(status).json({
+      data: null,
+      message: status === 500 ? '服务异常，请检查数据库连接或联系管理员' : (error as Error).message,
+      traceId: req.traceId,
+    })
+  }
+}
+function validatePassword(password: unknown) {
+  if (typeof password !== 'string' || password.length === 0 || password.length > 128 || !password.trim())
+    throw new BadRequestException('密码不能为空或超过 128 位')
+}
+const dummyHash = hashPassword(randomUUID())
+@Controller('api/v1')
+class PublicController {
+  @Get('health') async health() {
+    try {
+      await db.$queryRaw`SELECT 1`
+      return { data: { status: 'ok', mode: 'live', persistence: 'postgresql' } }
+    } catch {
+      throw new ServiceUnavailableException('数据库连接不可用')
+    }
+  }
+  @Get('auth/setup-status') async setupStatus() {
+    return {
+      data: {
+        initialized:
+          !!(await db.systemConfig.findUnique({ where: { key: 'admin-initialized' } })) ||
+          (await db.adminUser.count()) > 0,
+      },
+    }
+  }
+  @Post('auth/setup') async setup(@Body() body: { username?: unknown; password?: unknown }, @Req() req: AuthRequest) {
+    if (typeof body?.username !== 'string' || !/^[\p{L}\p{N}_.@-]{3,64}$/u.test(body.username.trim()))
+      throw new BadRequestException('用户名为 3–64 位文字、数字、下划线、点或短横线')
+    validatePassword(body.password)
+    const username = body.username.trim().toLowerCase(),
+      passwordHash = hashPassword(body.password as string)
+    await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(73194712)`
+      if ((await tx.systemConfig.findUnique({ where: { key: 'admin-initialized' } })) || (await tx.adminUser.count()))
+        throw new ForbiddenException('管理员已创建，请登录')
+      const role = await tx.role.upsert({ where: { name: 'SUPER_ADMIN' }, create: { name: 'SUPER_ADMIN' }, update: {} })
+      const admin = await tx.adminUser.create({ data: { username, passwordHash, roleId: role.id } })
+      await tx.systemConfig.create({ data: { key: 'admin-initialized', value: true } })
+      await tx.auditLog.create({
+        data: { actorId: admin.id, action: '创建初始管理员', targetId: admin.id, traceId: req.traceId!, diff: {} },
+      })
+    })
+    return { data: { created: true } }
+  }
+  @Post('auth/login') async login(@Body() body: { username?: unknown; password?: unknown }, @Req() req: AuthRequest) {
+    const key = req.ip || 'local',
+      now = Date.now()
+    const limit = failedLogins.get(key)
+    if (limit && limit.until > now && limit.count >= 8) throw new HttpException('登录尝试过多，请 15 分钟后重试', 429)
+    if (
+      typeof body?.username !== 'string' ||
+      typeof body?.password !== 'string' ||
+      body.username.length > 254 ||
+      body.password.length > 256
+    )
+      throw new BadRequestException('请输入用户名与密码')
+    const admin = await db.adminUser.findUnique({
+      where: { username: body.username.trim().toLowerCase() },
+      include: { role: true },
+    })
+    const valid = verifyPassword(body.password, admin?.passwordHash || dummyHash)
+    if (!admin?.enabled || admin.role.name !== 'SUPER_ADMIN' || !valid) {
+      failedLogins.set(key, {
+        count: limit && limit.until > now ? limit.count + 1 : 1,
+        until: limit && limit.until > now ? limit.until : now + 900000,
+      })
+      throw new UnauthorizedException('账号或密码错误')
+    }
+    failedLogins.delete(key)
+    await audit(admin.id, '管理员登录', admin.id, req.traceId!)
+    return {
+      data: {
+        token: jwt.sign({ role: admin.role.name, passwordVersion: admin.passwordVersion }, secret, {
+          subject: admin.id,
+          expiresIn: '8h',
+          issuer: 'shihui',
+          audience: 'admin',
+        }),
+        role: admin.role.name,
+        name: admin.username,
+      },
+    }
+  }
+  @Get('callbacks/wecom') async verify(@Query() q: Record<string, string>, @Res() res: Response) {
+    const output = decryptCallback(
+      await readConfig('wecom'),
+      q.msg_signature || '',
+      q.timestamp || '',
+      q.nonce || '',
+      q.echostr || '',
+    )
+    res.type('text/plain').send(output)
+  }
+  @Post('callbacks/wecom') async callback(
+    @Query() q: Record<string, string>,
+    @Body() body: unknown,
+    @Res() res: Response,
+  ) {
+    if (typeof body !== 'string') throw new BadRequestException('需要 XML 消息体')
+    await receiveCallback(q, body)
+    res.type('text/plain').send('success')
+  }
+}
+@ApiBearerAuth()
+@UseGuards(AuthGuard)
+@Controller('api/v1')
+class AdminController {
+  @Post('auth/change-password') async changePassword(
+    @Body() body: { currentPassword?: unknown; newPassword?: unknown },
+    @Req() req: AuthRequest,
+  ) {
+    validatePassword(body?.newPassword)
+    if (typeof body?.currentPassword !== 'string' || body.currentPassword.length > 256)
+      throw new BadRequestException('请输入当前密码')
+    const key = 'password:' + req.actor!.id,
+      now = Date.now(),
+      limit = failedLogins.get(key)
+    if (limit && limit.until > now && limit.count >= 8) throw new HttpException('尝试过多，请 15 分钟后重试', 429)
+    const admin = await db.adminUser.findUniqueOrThrow({ where: { id: req.actor!.id } })
+    if (!verifyPassword(body.currentPassword, admin.passwordHash)) {
+      failedLogins.set(key, {
+        count: limit && limit.until > now ? limit.count + 1 : 1,
+        until: limit && limit.until > now ? limit.until : now + 900000,
+      })
+      throw new BadRequestException('当前密码不正确')
+    }
+    if (body.currentPassword === body.newPassword) throw new BadRequestException('新密码不能与当前密码相同')
+    const passwordHash = hashPassword(body.newPassword as string)
+    await db.$transaction(async (tx) => {
+      const result = await tx.adminUser.updateMany({
+        where: { id: admin.id, passwordVersion: admin.passwordVersion },
+        data: { passwordHash, passwordVersion: { increment: 1 } },
+      })
+      if (!result.count) throw new BadRequestException('密码已变更，请重新登录')
+      await tx.auditLog.create({
+        data: { actorId: admin.id, action: '修改登录密码', targetId: admin.id, traceId: req.traceId!, diff: {} },
+      })
+    })
+    failedLogins.delete(key)
+    return { data: { changed: true } }
+  }
+
+  @Get('auth/profile') profile(@Req() req: AuthRequest) {
+    return { data: req.actor }
+  }
+  @Get('dashboard/overview') async overview() {
+    return { data: await business.overview() }
+  }
+  @Get('dashboard/trends') async trends(@Query('days') days: string) {
+    return { data: await business.trends([7, 30, 90].includes(Number(days)) ? Number(days) : 7) }
+  }
+  @Get('users') async users() {
+    return { data: await business.listUsers() }
+  }
+  @Patch('users/:id') async updateUser(
+    @Param('id') id: string,
+    @Body() body: { ratio?: number; status?: string },
+    @Req() req: AuthRequest,
+  ) {
+    if (body.ratio !== undefined && (!Number.isInteger(body.ratio) || body.ratio < 0 || body.ratio > 100))
+      throw new BadRequestException('比例需为 0–100 的整数')
+    if (body.status !== undefined && !['ACTIVE', 'DISABLED'].includes(body.status))
+      throw new BadRequestException('账户状态无效')
+    if (!(await db.user.findUnique({ where: { id } }))) throw new NotFoundException('用户不存在')
+    await db.$transaction(async (tx) => {
+      if (body.status !== undefined)
+        await tx.user.update({ where: { id }, data: { enabled: body.status === 'ACTIVE' } })
+      if (body.ratio !== undefined)
+        await tx.rebateRule.upsert({
+          where: { scopeKey: `user:${id}` },
+          create: { scopeKey: `user:${id}`, userId: id, basisPoints: body.ratio * 100 },
+          update: { basisPoints: body.ratio * 100, version: { increment: 1 } },
+        })
+      await tx.auditLog.create({
+        data: {
+          actorId: req.actor!.id,
+          action: '编辑用户',
+          targetId: id,
+          traceId: req.traceId!,
+          diff: { ratio: body.ratio, status: body.status },
+        },
+      })
+    })
+    return { data: { id } }
+  }
+  @Get('promotions') async promotions() {
+    return { data: await business.listPromotions() }
+  }
+  @Post('promotions/convert') async convert(@Body() body: { content?: unknown }, @Req() req: AuthRequest) {
+    if (typeof body.content !== 'string' || body.content.length > 3000)
+      throw new BadRequestException('请输入有效商品链接')
+    return { data: await business.convert(body.content, req.actor!.id, req.traceId!) }
+  }
+  @Get('orders') async orders() {
+    return { data: await business.listOrders() }
+  }
+  @Get('platforms') plugins() {
+    return {
+      data: listPlatforms().map((p) => ({
+        id: p.id,
+        name: p.name,
+        authentication: p.authentication,
+        documentationUrl: p.documentationUrl,
+        maxHistoryDays: p.maxHistoryDays,
+      })),
+    }
+  }
+  @Get('orders/sync-status') syncStatus() {
+    return orderSyncStatus().then((data) => ({ data }))
+  }
+  @Post('orders/sync') async sync(@Req() req: AuthRequest, @Body() body: { platform?: string; hours?: number }) {
+    return { data: await startOrderSync(req.actor!.id, req.traceId!, body || {}) }
+  }
+  @Get('rebates') async rebates() {
+    return {
+      data: (
+        await db.walletTransaction.findMany({
+          include: { wallet: { include: { user: true } } },
+          orderBy: { createdAt: 'desc' },
+        })
+      ).map((r) => ({
+        id: r.id,
+        user: r.wallet.user.name,
+        orderId: r.referenceId,
+        type: `${r.kind} · ${r.bucket}`,
+        amount: centsNumber(r.deltaCents),
+        before: centsNumber(r.beforeCents),
+        after: centsNumber(r.afterCents),
+        createdAt: dateText(r.createdAt),
+        source: r.actorId ? '管理员' : '系统',
+      })),
+    }
+  }
+  @Get('withdrawals') async withdrawals() {
+    return { data: await business.listWithdrawals() }
+  }
+  @Post('withdrawals/:id/:action') async withdrawal(
+    @Param('id') id: string,
+    @Param('action') action: string,
+    @Body() body: { note?: unknown; proof?: unknown },
+    @Req() req: AuthRequest,
+  ) {
+    if (
+      (body.note !== undefined && typeof body.note !== 'string') ||
+      (body.proof !== undefined && typeof body.proof !== 'string')
+    )
+      throw new BadRequestException('备注和凭证格式无效')
+    const note = String(body.note || ''),
+      proof = String(body.proof || '')
+    if (note.length > 500 || proof.length > 120) throw new BadRequestException('内容超长')
+    return { data: await business.withdrawalAction(id, action, note, proof, req.actor!.id, req.traceId!) }
+  }
+  @Get('settings') async settings() {
+    return { data: await business.settings() }
+  }
+  @Put('settings') async saveSettings(@Body() body: { ratio: number; minimum: number }, @Req() req: AuthRequest) {
+    if (
+      !Number.isInteger(body.ratio) ||
+      body.ratio < 0 ||
+      body.ratio > 100 ||
+      !Number.isInteger(body.minimum) ||
+      body.minimum < 1 ||
+      body.minimum > 100000
+    )
+      throw new BadRequestException('请填写有效比例与最低提现整数元')
+    const value = { ratio: body.ratio, minimum: body.minimum }
+    await db.$transaction([
+      db.systemConfig.upsert({
+        where: { key: 'rules' },
+        create: { key: 'rules', value },
+        update: { value, version: { increment: 1 } },
+      }),
+      db.auditLog.create({
+        data: { actorId: req.actor!.id, action: '修改默认规则', targetId: 'rules', traceId: req.traceId!, diff: value },
+      }),
+    ])
+    return { data: value }
+  }
+  @Get('audit-logs') async logs() {
+    return {
+      data: (await db.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 500 })).map((l) => ({
+        id: l.id,
+        action: l.action,
+        target: l.targetId,
+        actor: l.actorId,
+        createdAt: l.createdAt.toISOString(),
+      })),
+    }
+  }
+  @Get('service-status') async serviceStatus() {
+    return {
+      data: await Promise.all(
+        (['jd', 'wecom'] as const).map(async (kind) => {
+          const s = await integrationStatus(kind)
+          return { kind, configured: s.configured, test: s.test }
+        }),
+      ),
+    }
+  }
+  @Get('integrations/:kind') async integration(@Param('kind') kind: string) {
+    return { data: await integrationStatus(provider(kind)) }
+  }
+  @Get('wecom/menu') async menu() { return { data: await getMenu() } }
+  @Put('wecom/menu') async saveMenu(@Body() body: { draft?: unknown }, @Req() req: AuthRequest) {
+    return { data: await saveMenu(body?.draft, req.actor!.id, req.traceId!) }
+  }
+  @Post('wecom/menu/publish') async publishMenu(@Body() body: { draft?: unknown }, @Req() req: AuthRequest) {
+    return { data: await publishMenu(body?.draft, req.actor!.id, req.traceId!) }
+  }
+  @Post('integrations/:kind/details') async integrationDetails(@Param('kind') kind: string, @Req() req: AuthRequest, @Res({ passthrough: true }) res: Response) {
+    if (req.actor!.role !== 'SUPER_ADMIN') throw new ForbiddenException('仅超级管理员可查看配置详情')
+    const id = provider(kind)
+    const status = await integrationStatus(id)
+    const config = await readConfig(id)
+    res.setHeader('Cache-Control', 'no-store')
+    await audit(req.actor!.id, '查看平台配置详情', id, req.traceId!)
+    return { data: { ...status, fields: status.fields.map((field) => ({ ...field, value: config[field.key] || '' })) } }
+  }
+  @Put('integrations/:kind') async saveIntegration(
+    @Param('kind') kind: string,
+    @Body() body: unknown,
+    @Req() req: AuthRequest,
+  ) {
+    return { data: await saveConfig(provider(kind), body, req.actor!.id, req.traceId!) }
+  }
+  @Post('integrations/:kind/test') async testIntegration(@Param('kind') kind: string, @Req() req: AuthRequest) {
+    if (kind === 'taobao') throw new BadRequestException('淘宝联盟配置可保存，接口联调尚未启用')
+    return { data: await testConnection(provider(kind), req.actor!.id, req.traceId!) }
+  }
+}
+function provider(kind: string): Provider {
+  if (kind !== 'wecom' && kind !== 'taobao') platform(kind)
+  return kind
+}
+@Module({ controllers: [PublicController, AdminController], providers: [AuthGuard] })
+class AppModule {}
+async function bootstrap() {
+  await db.$connect()
+  const app = await NestFactory.create(AppModule)
+  app.use(helmet())
+  app.use('/api/v1/callbacks/wecom', text({ type: ['text/xml', 'application/xml'], limit: '64kb' }))
+  const buckets = new Map<string, { count: number; until: number }>()
+  app.use((req: AuthRequest, res: Response, next: () => void) => {
+    req.traceId = randomUUID()
+    res.setHeader('X-Trace-Id', req.traceId)
+    const now = Date.now(),
+      key = req.ip || 'local'
+    if (buckets.size > 10000) for (const [k, b] of buckets) if (b.until < now) buckets.delete(k)
+    const previous = buckets.get(key),
+      b = previous && previous.until > now ? previous : { count: 0, until: now + 60000 }
+    b.count++
+    buckets.set(key, b)
+    if (b.count > 180) {
+      res.status(429).json({ message: '请求过于频繁', traceId: req.traceId })
+      return
+    }
+    next()
+  })
+  app.useGlobalFilters(new Errors())
+  SwaggerModule.setup(
+    'api/docs',
+    app,
+    SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().setTitle('拾惠返利 API').setVersion('0.2.0').addBearerAuth().build(),
+    ),
+  )
+  await app.listen(Number(env.PORT || 3001), env.HOST || '127.0.0.1')
+  const timer = setInterval(() => void processInbox().catch(() => console.error('Inbox worker unavailable')), 3000)
+  timer.unref()
+  const orderTimer = setInterval(
+    () => void processOrderSync().catch(() => console.error('Order sync worker unavailable')),
+    2000,
+  )
+  orderTimer.unref()
+  app.enableShutdownHooks()
+}
+void bootstrap().catch(() => {
+  console.error('启动失败：请检查数据库、迁移与服务端环境变量')
+  process.exitCode = 1
+})

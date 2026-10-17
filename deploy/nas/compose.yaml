@@ -1,0 +1,45 @@
+name: shop-cashback
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+services:
+  server:
+    image: ${SERVER_IMAGE:?Set SERVER_IMAGE in .env}
+    environment:
+      DATABASE_URL: postgresql://rebate:${POSTGRES_PASSWORD}@postgres:5432/rebate
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?Set CONFIG_ENCRYPTION_KEY in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *logging
+  admin:
+    image: ${ADMIN_IMAGE:?Set ADMIN_IMAGE in .env}
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8081}:8080"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rebate
+      POSTGRES_USER: rebate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U rebate -d rebate"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging: *logging
+volumes:
+  postgres_data:

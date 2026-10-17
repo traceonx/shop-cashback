@@ -1,0 +1,10 @@
+node_modules
+.npm-cache
+**/dist
+.env
+**/.env
+**/.env.*
+*.tar
+*.dump
+.git
+artifacts

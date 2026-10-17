@@ -1,0 +1,397 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  SUPER_ADMIN
+  ADMIN
+  FINANCE
+  USER
+}
+enum OrderStatus {
+  CREATED
+  PAID
+  COMPLETED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  INVALID
+  SETTLED
+  UNATTRIBUTED
+}
+enum WithdrawalStatus {
+  PENDING_REVIEW
+  APPROVED
+  PENDING_PAYMENT
+  COMPLETED
+  REJECTED
+  PAYMENT_FAILED
+  CANCELLED
+}
+model AdminUser {
+  id           String   @id @default(uuid())
+  username     String   @unique @map("email")
+  passwordVersion Int @default(0)
+  passwordHash String
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id])
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@map("admin_users")
+}
+model Role {
+  id          String           @id @default(uuid())
+  name        RoleName         @unique
+  admins      AdminUser[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  @@map("roles")
+}
+model Permission {
+  id    String @id @default(uuid())
+  key   String @unique
+  roles RolePermission[]
+  @@map("permissions")
+}
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+model User {
+  id          String              @id @default(uuid())
+  name        String
+  enabled     Boolean             @default(true)
+  identities  UserIdentity[]
+  tracking    UserTrackingCode[]
+  promotions  PromotionRecord[]
+  orders      AffiliateOrder[]
+  wallet      WalletAccount?
+  withdrawals WithdrawalRequest[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  @@map("users")
+}
+model UserIdentity {
+  id              String   @id @default(uuid())
+  userId          String
+  channelId       String
+  externalUserId  String
+  user            User     @relation(fields: [userId], references: [id])
+  channel         Channel  @relation(fields: [channelId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@unique([channelId, externalUserId])
+  @@map("user_identities")
+}
+model Channel {
+  id         String         @id @default(uuid())
+  kind       String
+  name       String
+  enabled    Boolean        @default(false)
+  identities UserIdentity[]
+  config     ChannelConfig?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  @@map("channels")
+}
+model ChannelConfig {
+  id              String   @id @default(uuid())
+  channelId       String   @unique
+  channel         Channel  @relation(fields: [channelId], references: [id])
+  encryptedConfig String
+  keyVersion      Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@map("channel_configs")
+}
+model AffiliatePlatform {
+  id        String             @id @default(uuid())
+  code      String             @unique
+  accounts  AffiliateAccount[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  @@map("affiliate_platforms")
+}
+model AffiliateAccount {
+  id               String            @id @default(uuid())
+  platformId       String
+  platform         AffiliatePlatform @relation(fields: [platformId], references: [id])
+  externalId       String
+  trackingVerified Boolean           @default(false)
+  config           AffiliateConfig?
+  orders           AffiliateOrder[]
+  tracking         UserTrackingCode[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  @@unique([platformId, externalId])
+  @@map("affiliate_accounts")
+}
+model AffiliateConfig {
+  id              String           @id @default(uuid())
+  accountId       String           @unique
+  account         AffiliateAccount @relation(fields: [accountId], references: [id])
+  encryptedConfig String
+  keyVersion      Int
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  @@map("affiliate_configs")
+}
+model UserTrackingCode {
+  id        String           @id @default(uuid())
+  userId    String
+  accountId String
+  code      String
+  user      User             @relation(fields: [userId], references: [id])
+  account   AffiliateAccount @relation(fields: [accountId], references: [id])
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  @@unique([accountId, code])
+  @@unique([accountId, userId])
+  @@map("user_tracking_codes")
+}
+model Product {
+  id         String   @id @default(uuid())
+  platform   String
+  sku        String
+  title      String
+  imageUrl   String?
+  raw        Json
+  fetchedAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  @@unique([platform, sku])
+  @@map("products")
+}
+model PromotionRecord {
+  id             String   @id @default(uuid())
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id])
+  channelId      String
+  accountId      String
+  trackingCode   String
+  sourceUrl      String
+  promotionUrl   String?
+  productSnapshot Json?
+  status         String
+  errorCode      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([userId, createdAt])
+  @@map("promotion_records")
+}
+model AffiliateOrder {
+  id              String              @id @default(uuid())
+  platform        String
+  accountId       String
+  account         AffiliateAccount    @relation(fields: [accountId], references: [id])
+  externalOrderId String
+  externalLineId  String
+  userId          String?
+  user            User?               @relation(fields: [userId], references: [id])
+  status          OrderStatus         @default(UNATTRIBUTED)
+  rawStatus       String
+  rawData         Json
+  amountCents     BigInt?
+  paidAmountCents BigInt?
+  completedAt     DateTime?
+  commissionCents BigInt?
+  rebateCents     BigInt?
+  ruleSnapshot    Json?
+  placedAt        DateTime
+  history         OrderStatusHistory[]
+  items           AffiliateOrderItem[]
+  rebates         RebateRecord[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  @@unique([platform, accountId, externalOrderId, externalLineId])
+  @@index([userId, placedAt])
+  @@map("affiliate_orders")
+}
+model AffiliateOrderItem {
+  id           String         @id @default(uuid())
+  orderId      String
+  order        AffiliateOrder @relation(fields: [orderId], references: [id])
+  sku          String
+  title        String
+  quantity     Int
+  amountCents  BigInt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  @@map("affiliate_order_items")
+}
+model OrderStatusHistory {
+  id        String         @id @default(uuid())
+  orderId   String
+  order     AffiliateOrder @relation(fields: [orderId], references: [id])
+  status    OrderStatus
+  rawStatus String
+  eventKey  String         @unique
+  createdAt DateTime       @default(now())
+  @@map("order_status_history")
+}
+model RebateRule {
+  id          String   @id @default(uuid())
+  scopeKey    String   @unique
+  userId      String?
+  platform    String?
+  basisPoints Int
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@map("rebate_rules")
+}
+model RebateRecord {
+  id           String         @id @default(uuid())
+  orderId      String
+  order        AffiliateOrder @relation(fields: [orderId], references: [id])
+  businessKey  String         @unique
+  amountCents  BigInt
+  ruleSnapshot Json
+  kind         String
+  createdAt    DateTime       @default(now())
+  @@map("rebate_records")
+}
+model WalletAccount {
+  id             String              @id @default(uuid())
+  userId         String              @unique
+  user           User                @relation(fields: [userId], references: [id])
+  pendingCents   BigInt              @default(0)
+  availableCents BigInt              @default(0)
+  frozenCents    BigInt              @default(0)
+  withdrawnCents BigInt              @default(0)
+  totalCents     BigInt              @default(0)
+  version        Int                 @default(0)
+  transactions   WalletTransaction[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  @@map("wallet_accounts")
+}
+model WalletTransaction {
+  id            String        @id @default(uuid())
+  walletId      String
+  wallet        WalletAccount @relation(fields: [walletId], references: [id])
+  businessKey   String        @unique
+  kind          String
+  bucket        String
+  deltaCents    BigInt
+  beforeCents   BigInt
+  afterCents    BigInt
+  referenceId   String
+  reversalOfId  String?
+  reason        String
+  actorId       String?
+  createdAt     DateTime      @default(now())
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
+}
+model WithdrawalRequest {
+  id             String              @id @default(uuid())
+  userId         String
+  user           User                @relation(fields: [userId], references: [id])
+  idempotencyKey String              @unique
+  amountCents    BigInt
+  status         WithdrawalStatus    @default(PENDING_REVIEW)
+  encryptedPayee String
+  reviewerId     String?
+  reviewedAt     DateTime?
+  reviewNote     String?
+  payments       WithdrawalPayment[]
+  version        Int                 @default(0)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  @@index([userId, createdAt])
+  @@map("withdrawal_requests")
+}
+model WithdrawalPayment {
+  id             String            @id @default(uuid())
+  withdrawalId   String
+  withdrawal     WithdrawalRequest @relation(fields: [withdrawalId], references: [id])
+  idempotencyKey String            @unique
+  proofObjectKey String
+  actorId        String
+  amountCents    BigInt
+  paidAt         DateTime
+  createdAt      DateTime          @default(now())
+  @@map("withdrawal_payments")
+}
+model NotificationEvent {
+  id            String               @id @default(uuid())
+  eventKey      String               @unique
+  userId        String
+  channelId     String
+  type          String
+  payload       Json
+  publishedAt   DateTime?
+  records       NotificationRecord[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  @@index([publishedAt, createdAt])
+  @@map("notification_events")
+}
+model NotificationRecord {
+  id        String            @id @default(uuid())
+  eventId   String
+  event     NotificationEvent @relation(fields: [eventId], references: [id])
+  attempt   Int
+  status    String
+  errorCode String?
+  createdAt DateTime          @default(now())
+  @@unique([eventId, attempt])
+  @@map("notification_records")
+}
+model IncomingMessage {
+  id         String   @id @default(uuid())
+  channelId  String
+  externalId String
+  status     String
+  payload    Json?
+  attempts   Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  lockedUntil DateTime?
+  errorCode String?
+  receivedAt DateTime @default(now())
+  @@unique([channelId, externalId])
+  @@map("incoming_messages")
+}
+model SystemConfig {
+  key       String   @id
+  value     Json
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("system_configs")
+}
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String
+  action    String
+  targetId  String
+  traceId   String
+  diff      Json
+  createdAt DateTime @default(now())
+  @@index([targetId, createdAt])
+  @@map("audit_logs")
+}
+model SyncJob {
+  id         String   @id @default(uuid())
+  accountId  String
+  cursor     Json
+  status     String
+  attempts   Int      @default(0)
+  errorCode  String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  @@map("sync_jobs")
+}

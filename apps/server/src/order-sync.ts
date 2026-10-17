@@ -1,0 +1,213 @@
+import { BadRequestException } from '@nestjs/common'
+import { db, json } from './database'
+import { readConfig } from './integrations'
+import { platform } from './platforms/registry'
+
+type Cursor = {
+  engine: 'platform-v1'
+  platform: string
+  from: string
+  until: string
+  next: string
+  page: number
+  count: number
+  windows: number
+  total: number
+  type: 1 | 3
+}
+export async function startOrderSync(actor: string, trace: string, body: { platform?: string; hours?: number } = {}) {
+  const plugin = platform(body.platform || 'jd'),
+    hours = body.hours ?? 24
+  if (!Number.isInteger(hours) || hours < 1 || hours > plugin.maxHistoryDays * 24)
+    throw new BadRequestException(`请选择 1 小时至 ${plugin.maxHistoryDays} 天的同步范围`)
+  if (!plugin.configured(await readConfig(plugin.id))) throw new BadRequestException('请先在联盟配置中保存应用凭证')
+  const until = new Date(),
+    from = new Date(until.getTime() - hours * 3600000)
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(73194713)`
+    const running = await tx.syncJob.findFirst({
+      where: {
+        accountId: plugin.accountId,
+        status: { in: ['QUEUED', 'RUNNING'] },
+        cursor: { path: ['engine'], equals: 'platform-v1' },
+      },
+    })
+    if (running) return { id: running.id, message: '已有同步任务，正在继续处理。' }
+    const cursor: Cursor = {
+      engine: 'platform-v1',
+      platform: plugin.id,
+      from: from.toISOString(),
+      until: until.toISOString(),
+      next: from.toISOString(),
+      page: 1,
+      count: 0,
+      windows: 0,
+      total: Math.ceil((until.getTime() - from.getTime()) / plugin.maxWindowMs),
+      type: hours === 1 ? 3 : 1,
+    }
+    const job = await tx.syncJob.create({
+      data: { accountId: plugin.accountId, cursor: json(cursor), status: 'QUEUED' },
+    })
+    await tx.auditLog.create({
+      data: {
+        actorId: actor,
+        action: '开始同步订单',
+        targetId: job.id,
+        traceId: trace,
+        diff: { platform: plugin.id, hours },
+      },
+    })
+    return { id: job.id, message: '同步任务已开始，可离开页面，后台将分时段拉取。' }
+  })
+}
+export async function orderSyncStatus() {
+  const job = await db.syncJob.findFirst({
+    where: { cursor: { path: ['engine'], equals: 'platform-v1' } },
+    orderBy: { createdAt: 'desc' },
+  })
+  if (!job) return null
+  const c = job.cursor as unknown as Cursor
+  return {
+    id: job.id,
+    status: job.status,
+    platform: c.platform,
+    count: c.count,
+    windows: c.windows,
+    total: c.total,
+    from: c.from,
+    until: c.until,
+    error: job.errorCode,
+    finishedAt: job.finishedAt,
+  }
+}
+let working = false
+export async function processOrderSync() {
+  if (working) return
+  working = true
+  try {
+    const job = await db.syncJob.findFirst({
+      where: {
+        cursor: { path: ['engine'], equals: 'platform-v1' },
+        OR: [{ status: 'QUEUED' }, { status: 'RUNNING', updatedAt: { lt: new Date(Date.now() - 120000) } }],
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+    if (!job) return
+    const lease = new Date()
+    const claim = await db.syncJob.updateMany({
+      where: { id: job.id, updatedAt: job.updatedAt },
+      data: { status: 'RUNNING', updatedAt: lease, startedAt: job.startedAt || lease, attempts: { increment: 1 } },
+    })
+    if (!claim.count) return
+    try {
+      const c = job.cursor as unknown as Cursor,
+        plugin = platform(c.platform),
+        from = new Date(c.next),
+        until = new Date(Math.min(from.getTime() + plugin.maxWindowMs, new Date(c.until).getTime()))
+      if (c.page > 10000) throw new BadRequestException('单时段分页超限，已停止；已导入数据保留')
+      const page = await plugin.queryOrders(await readConfig(c.platform), { from, until, page: c.page, type: c.type })
+      if (page.hasMore && !page.rows.length)
+        throw new BadRequestException('平台返回空页但仍有下一页，已停止以免遗漏订单')
+      const next: Cursor = {
+        ...c,
+        count: c.count + page.rows.length,
+        page: page.hasMore ? c.page + 1 : 1,
+        next: page.hasMore ? c.next : until.toISOString(),
+        windows: c.windows + (page.hasMore ? 0 : 1),
+      }
+      const done = !page.hasMore && until.getTime() >= new Date(c.until).getTime()
+      await db.$transaction(
+        async (tx) => {
+          const held = await tx.syncJob.updateMany({
+            where: { id: job.id, status: 'RUNNING', updatedAt: lease },
+            data: {
+              cursor: json(next),
+              status: done ? 'COMPLETED' : 'QUEUED',
+              finishedAt: done ? new Date() : null,
+              errorCode: null,
+            },
+          })
+          if (!held.count) return
+          for (const row of page.rows) {
+            const tracking = row.trackingCode
+              ? await tx.userTrackingCode.findUnique({
+                  where: { accountId_code: { accountId: plugin.accountId, code: row.trackingCode } },
+                })
+              : null
+            const promotion = tracking
+              ? await tx.promotionRecord.findFirst({
+                  where: {
+                    accountId: plugin.accountId,
+                    trackingCode: tracking.code,
+                    userId: tracking.userId,
+                    status: 'SUCCESS',
+                  },
+                })
+              : null
+            const owner = promotion ? tracking!.userId : null
+            const existing = await tx.affiliateOrder.findUnique({
+              where: {
+                platform_accountId_externalOrderId_externalLineId: {
+                  platform: plugin.id,
+                  accountId: plugin.accountId,
+                  externalOrderId: row.orderId,
+                  externalLineId: row.lineId,
+                },
+              },
+              select: { userId: true },
+            })
+            if (owner && existing?.userId && owner !== existing.userId)
+              throw new BadRequestException('订单用户标识冲突，已停止同步，请人工核对')
+            const key = {
+              platform: plugin.id,
+              accountId: plugin.accountId,
+              externalOrderId: row.orderId,
+              externalLineId: row.lineId,
+            }
+            const common = {
+              ...(owner ? { userId: owner } : {}),
+              status: row.status,
+              rawStatus: row.rawStatus,
+              rawData: json(row.raw),
+              commissionCents: row.commissionCents === null ? null : BigInt(row.commissionCents),
+              completedAt: row.completedAt,
+            }
+            await tx.affiliateOrder.upsert({
+              where: { platform_accountId_externalOrderId_externalLineId: key },
+              create: {
+                ...key,
+                ...common,
+                placedAt: row.placedAt,
+                items: {
+                  create: {
+                    sku: row.sku,
+                    title: row.title,
+                    quantity: row.quantity,
+                    amountCents: BigInt(row.commissionBaseCents),
+                  },
+                },
+              },
+              update: {
+                ...common,
+                items: {
+                  updateMany: {
+                    where: { sku: row.sku },
+                    data: { title: row.title, quantity: row.quantity, amountCents: BigInt(row.commissionBaseCents) },
+                  },
+                },
+              },
+            })
+          }
+        },
+        { timeout: 30000 },
+      )
+    } catch (e) {
+      await db.syncJob.updateMany({
+        where: { id: job.id, status: 'RUNNING', updatedAt: lease },
+        data: { status: 'FAILED', finishedAt: new Date(), errorCode: e instanceof Error ? e.message : '同步失败' },
+      })
+    }
+  } finally {
+    working = false
+  }
+}

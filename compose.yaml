@@ -1,0 +1,4 @@
+# 在项目根目录执行 docker compose up -d --build
+include:
+  - path: deploy/compose.yml
+    env_file: .env

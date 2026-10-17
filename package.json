@@ -1,0 +1,28 @@
+{
+  "name": "shop-cashback",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,admin \"npm run dev -w apps/server\" \"npm run dev -w apps/admin\"",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test -w apps/server",
+    "db:validate": "prisma validate --schema prisma/schema.prisma",
+    "test:api": "npm run build -w apps/server && node scripts/smoke.mjs",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "admin:create": "node scripts/create-admin.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prettier": "3.6.2",
+    "prisma": "6.12.0",
+    "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "js-yaml": "5.5.0"
+  }
+}
