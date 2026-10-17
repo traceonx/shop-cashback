@@ -13,6 +13,7 @@ export const fields = {
     ['token', '回调 Token', true],
     ['aesKey', 'EncodingAESKey', true],
     ['adminUserId', '管理员通知 UserID', false],
+    ['proxy', '代理地址（可选，2022-06-20 后创建的应用需固定可信 IP 时填写，如 http://IP:端口）', false],
   ],
 } as const
 export type Provider = string
@@ -60,6 +61,8 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
   }
   if (kind === 'wecom' && next.aesKey && !/^[A-Za-z0-9+/]{43}$/.test(next.aesKey))
     throw new BadRequestException('EncodingAESKey 必须为 43 位 Base64 字符')
+  if (kind === 'wecom' && next.proxy && !/^https?:\/\/[^\s/]+/i.test(next.proxy))
+    throw new BadRequestException('代理地址需以 http:// 或 https:// 开头')
   if (kind === 'wecom' && next.agentId && !/^\d+$/.test(next.agentId))
     throw new BadRequestException('AgentID 必须为数字')
   if (kind === 'jd' && next.positionId && !/^\d+$/.test(next.positionId))
@@ -110,16 +113,19 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
   })
   return integrationStatus(kind)
 }
+// 企业微信接口基址：配置了代理地址时经由代理转发（参考 MoviePilot 的 WECHAT_PROXY），否则直连官方
+export const wecomUrl = (c: Config, path: string) =>
+  `${(c.proxy || 'https://qyapi.weixin.qq.com').trim().replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
 export async function wecomToken(c: Config) {
   if (!c.corpId || !c.secret) throw new ServiceUnavailableException('请先在渠道管理中保存 CorpID 与应用 Secret')
   let response: Response
   try {
     response = await fetch(
-      `https://qyapi.weixin.qq.com/cgi-bin/gettoken?${new URLSearchParams({ corpid: c.corpId, corpsecret: c.secret })}`,
+      wecomUrl(c, `cgi-bin/gettoken?${new URLSearchParams({ corpid: c.corpId, corpsecret: c.secret })}`),
       { signal: AbortSignal.timeout(10000), redirect: 'error' },
     )
   } catch {
-    throw new ServiceUnavailableException('企业微信连接失败或超时')
+    throw new ServiceUnavailableException(c.proxy ? `企业微信代理 ${c.proxy} 连接失败或超时` : '企业微信连接失败或超时')
   }
   if (!response.ok) throw new ServiceUnavailableException('企业微信接口不可用')
   const data = (await response.json()) as any

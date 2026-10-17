@@ -1,6 +1,6 @@
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common'
 import { db, audit, json } from './database'
-import { readConfig, wecomToken } from './integrations'
+import { readConfig, wecomToken, wecomUrl } from './integrations'
 
 export const menuActions = {
   HELP_SHOP: { label: '如何查返利', command: '/查返利' },
@@ -62,7 +62,7 @@ export async function publishMenu(value: unknown, actor: string, trace: string) 
   const token = await wecomToken(config)
   let response: Response
   try {
-    response = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/menu/create?${new URLSearchParams({ access_token: token, agentid: config.agentId })}`, {
+    response = await fetch(wecomUrl(config, `cgi-bin/menu/create?${new URLSearchParams({ access_token: token, agentid: config.agentId })}`), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(menuPayload(draft)), signal: AbortSignal.timeout(10000), redirect: 'error',
     })
   } catch { throw new ServiceUnavailableException('菜单发布请求失败或超时，请检查企业微信后台实际菜单后重试') }

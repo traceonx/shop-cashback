@@ -2,7 +2,7 @@ import { createHash, createDecipheriv, timingSafeEqual } from 'node:crypto'
 import { XMLParser } from 'fast-xml-parser'
 import { BadRequestException, UnauthorizedException } from '@nestjs/common'
 import { db, dateText } from './database'
-import { readConfig, wecomToken, type Config } from './integrations'
+import { readConfig, wecomToken, wecomUrl, type Config } from './integrations'
 import { convert } from './business'
 import { menuCommand } from './wecom-menu'
 import { listPlatforms } from './platforms/registry'
@@ -72,7 +72,7 @@ export async function receiveCallback(query: Record<string, string>, body: strin
 }
 async function send(c: Config, user: string, content: string) {
   const token = await wecomToken(c)
-  const r = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${encodeURIComponent(token)}`, {
+  const r = await fetch(wecomUrl(c, `cgi-bin/message/send?access_token=${encodeURIComponent(token)}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
