@@ -116,6 +116,8 @@ export async function processOrderSync() {
         windows: c.windows + (page.hasMore ? 0 : 1),
       }
       const done = !page.hasMore && until.getTime() >= new Date(c.until).getTime()
+      if (page.rows.length) console.log(`[订单同步] ${c.platform} ${from.toISOString()} 第 ${c.page} 页导入 ${page.rows.length} 条`)
+      if (done) console.log(`[订单同步] ${c.platform} 同步完成，共 ${next.count} 条`)
       await db.$transaction(
         async (tx) => {
           const held = await tx.syncJob.updateMany({
@@ -202,6 +204,7 @@ export async function processOrderSync() {
         { timeout: 30000 },
       )
     } catch (e) {
+      console.warn(`[订单同步] 失败：${e instanceof Error ? e.message : e}`)
       await db.syncJob.updateMany({
         where: { id: job.id, status: 'RUNNING', updatedAt: lease },
         data: { status: 'FAILED', finishedAt: new Date(), errorCode: e instanceof Error ? e.message : '同步失败' },

@@ -50,7 +50,7 @@ export async function receiveCallback(query: Record<string, string>, body: strin
     )
   const msg = xmlObject(plain)
   if (msg.ToUserName !== c.corpId || String(msg.AgentID) !== c.agentId)
-    throw new UnauthorizedException('回调应用不匹配')
+    throw new UnauthorizedException(`回调应用不匹配（AgentID ${msg.AgentID}，配置为 ${c.agentId}）`)
   if (c.enabled === 'false') return // 渠道已停用：验签通过但不处理消息
   const event = msg.MsgType === 'event' && String(msg.Event).toLowerCase() === 'click'
   if (msg.MsgType !== 'text' && !event) return
@@ -182,12 +182,15 @@ export async function processInbox() {
           reply = e instanceof Error ? e.message : '转链失败，请稍后重试。'
         }
       }
+      console.log(`[企业微信] ${sender}：${content.trim().slice(0, 60)}`)
       await send(await readConfig('wecom'), sender, reply)
+      console.log(`[企业微信] 已回复 ${sender}`)
       await db.incomingMessage.update({
         where: { id: message.id },
         data: { status: 'COMPLETED', lockedUntil: null, errorCode: null },
       })
-    } catch {
+    } catch (e) {
+      console.warn(`[企业微信] 消息处理失败（第 ${message.attempts + 1} 次）：${e instanceof Error ? e.message : e}`)
       await db.incomingMessage.update({
         where: { id: message.id },
         data: {

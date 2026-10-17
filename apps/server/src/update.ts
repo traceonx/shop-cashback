@@ -41,6 +41,7 @@ function load(): State {
   }
 }
 function persist(next: State) {
+  if (next.message && next.message !== state.message) console[next.success === false ? 'warn' : 'log'](`[一键更新] ${next.message}`)
   state = next
   try {
     mkdirSync(dirname(stateFile), { recursive: true })

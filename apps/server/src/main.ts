@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { AppLogger, readLogs, logText } from './logs'
 import './config'
 import { NestFactory } from '@nestjs/core'
 import {
@@ -85,6 +86,7 @@ class Errors implements ExceptionFilter {
       req = c.getRequest<AuthRequest>(),
       res = c.getResponse<Response>()
     const status = error instanceof HttpException ? error.getStatus() : 500
+    if (status >= 500) console.error(`[接口] ${req.method} ${req.originalUrl} 失败：`, error instanceof Error ? error.stack || error.message : error)
     res.status(status).json({
       data: null,
       message: status === 500 ? '服务异常，请检查数据库连接或联系管理员' : (error as Error).message,
@@ -409,6 +411,13 @@ class AdminController {
   @Get('integrations/:kind') async integration(@Param('kind') kind: string) {
     return { data: await integrationStatus(provider(kind)) }
   }
+  @Get('system/logs') systemLogs(@Query('after') after?: string) {
+    return { data: readLogs(Number(after) || 0) }
+  }
+  @Get('system/logs/download') downloadLogs(@Res() res: Response) {
+    res.setHeader('Content-Disposition', `attachment; filename="shop-cashback-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.log"`)
+    res.type('text/plain; charset=utf-8').send(logText())
+  }
   @Get('system/update') async systemUpdate() {
     return { data: await updateStatus() }
   }
@@ -454,7 +463,7 @@ class AppModule {}
 async function bootstrap() {
   console.log(versionText())
   await db.$connect()
-  const app = await NestFactory.create(AppModule)
+  const app = await NestFactory.create(AppModule, { logger: new AppLogger() })
   app.use(
     helmet({
       // 未配置 HTTPS 时 HSTS 无意义，并会让同域名后续访问被强制跳转 https。

@@ -55,6 +55,7 @@ import './styles.css'
 import { WecomMenu } from './WecomMenu'
 import { SystemUpdate } from './SystemUpdate'
 import { WecomConfig } from './WecomConfig'
+import { LogViewer } from './LogViewer'
 
 const navigation: [string, string, LucideIcon][] = [
   ['/', '数据概览', LayoutDashboard],
@@ -213,7 +214,8 @@ function App() {
   const [signed, setSigned] = useState(!!sessionStorage.getItem('rebate-token-v2'))
   const [toast, setToast] = useState(''),
     [mobile, setMobile] = useState(false),
-    [notice, setNotice] = useState(false)
+    [notice, setNotice] = useState(false),
+    [logs, setLogs] = useState(false)
   const location = useLocation(),
     navigate = useNavigate()
   const notify = useCallback((message: string) => setToast(message), [])
@@ -235,6 +237,8 @@ function App() {
     <>
       {!signed ? (
         <Login onLogin={() => setSigned(true)} />
+      ) : location.pathname === '/logs' ? (
+        <LogViewer standalone />
       ) : (
         <div className="app-shell">
           {mobile && <div className="sidebar-scrim" onClick={() => setMobile(false)} />}
@@ -273,6 +277,9 @@ function App() {
                 <strong>{navigation.find((n) => n[0] === location.pathname)?.[1] || '数据概览'}</strong>
               </div>
               <div className="top-actions">
+                <button className="icon-button log-entry" aria-label="实时日志" title="实时日志" onClick={() => setLogs(true)}>
+                  <FileText size={18} />
+                </button>
                 <div className="notification-wrap">
                   <button className="icon-button" aria-label="通知" onClick={() => setNotice(!notice)}>
                     <Bell size={18} />
@@ -312,6 +319,7 @@ function App() {
                 </button>
               </div>
             </header>
+            {logs && <LogViewer onClose={() => setLogs(false)} />}
             <div className="page-content">
               <Routes>
                 <Route path="/" element={<Dashboard notify={notify} />} />
