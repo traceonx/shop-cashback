@@ -6,6 +6,25 @@ DATA_DIR="${DATA_DIR:-/app/data}"
 # 以 root 启动时：修正数据目录权限；若挂载了 docker.sock（一键更新），把 node 加入其所属组；然后降权为 node 运行
 if [ "$(id -u)" = "0" ]; then
   mkdir -p "$DATA_DIR" && chown node:node "$DATA_DIR"
+  if [ -z "$DATABASE_URL" ]; then
+    # PostgreSQL 要求数据目录权限为 0700/0750。NAS 共享目录常带继承 ACL（新目录自动 777），先清除再收紧权限
+    pg="$DATA_DIR/postgres"
+    mkdir -p "$pg"
+    setfacl -k -b "$DATA_DIR" 2>/dev/null || true
+    setfacl -R -k -b "$pg" 2>/dev/null || true
+    chown -R node:node "$pg"
+    chmod 700 "$pg"
+    mode=$(stat -c %a "$pg")
+    if [ "$mode" != "700" ] && [ "$mode" != "750" ]; then
+      echo "错误：$pg 权限为 $mode，所在文件系统不允许设置为 700，内置 PostgreSQL 无法启动。"
+      echo "解决：把 compose 中的 ./data 换成本地磁盘目录，或单独为数据库使用 Docker 卷："
+      echo "  volumes:"
+      echo "    - ./data:/app/data"
+      echo "    - pgdata:/app/data/postgres"
+      sleep 30
+      exit 1
+    fi
+  fi
   sock="${UPDATE_DOCKER_SOCKET:-/var/run/docker.sock}"
   if [ -S "$sock" ]; then
     gid=$(stat -c %g "$sock")
