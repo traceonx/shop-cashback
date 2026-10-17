@@ -71,19 +71,39 @@ export async function receiveCallback(query: Record<string, string>, body: strin
     update: {},
   })
 }
-async function send(c: Config, user: string, content: string) {
+type News = { title: string; description: string; url: string; picurl?: string }
+// 按 UTF-8 字节截断（企业微信图文：标题 ≤128 字节，描述 ≤512 字节）
+function clip(text: string, bytes: number) {
+  if (Buffer.byteLength(text) <= bytes) return text
+  let out = ''
+  for (const ch of text) {
+    if (Buffer.byteLength(out + ch + '…') > bytes) break
+    out += ch
+  }
+  return out + '…'
+}
+async function send(c: Config, user: string, content: string | News) {
   const token = await wecomToken(c)
+  const body =
+    typeof content === 'string'
+      ? { msgtype: 'text', text: { content } }
+      : {
+          msgtype: 'news',
+          news: {
+            articles: [
+              {
+                title: clip(content.title, 128),
+                description: clip(content.description, 512),
+                url: content.url,
+                ...(content.picurl ? { picurl: content.picurl } : {}),
+              },
+            ],
+          },
+        }
   const r = await fetch(wecomUrl(c, `cgi-bin/message/send?access_token=${encodeURIComponent(token)}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      touser: user,
-      msgtype: 'text',
-      agentid: Number(c.agentId),
-      text: { content },
-      enable_duplicate_check: 1,
-      duplicate_check_interval: 1800,
-    }),
+    body: JSON.stringify({ touser: user, agentid: Number(c.agentId), ...body, enable_duplicate_check: 1, duplicate_check_interval: 1800 }),
     signal: AbortSignal.timeout(10000),
     redirect: 'error',
   })
@@ -91,6 +111,7 @@ async function send(c: Config, user: string, content: string) {
   if (!r.ok || data.errcode !== 0 || data.invaliduser)
     throw new Error(data.invaliduser ? `接收人无效：${data.invaliduser}` : wecomError('消息发送失败', data))
 }
+const yuan = (cents: number | null | undefined) => (cents == null ? '待确认' : `¥${(cents / 100).toFixed(2)}`)
 let running = false
 export async function processInbox() {
   if (running) return
@@ -135,7 +156,7 @@ export async function processInbox() {
       }
       if (!identity) throw new Error('IDENTITY_CREATE_FAILED')
       const id = identity.userId
-      let reply = '发送商品链接查询优惠和预计返现。\n/订单 查看自己的订单\n/待结算 查看待结算订单\n/余额 查看账户金额\n/提现记录 查看提现进度\n订单同步可能延迟，返现以联盟结算为准；取消或退款可能影响返现。'
+      let reply: string | News = '发送商品链接查询优惠和预计返现。\n/订单 查看自己的订单\n/待结算 查看待结算订单\n/余额 查看账户金额\n/提现记录 查看提现进度\n订单同步可能延迟，返现以联盟结算为准；取消或退款可能影响返现。'
       if (!identity.user.enabled) reply = '当前账户已禁用，请联系管理员。'
       else if (content.trim() === '/查返利') reply = '直接发送已接入平台的 HTTPS 商品链接或含链接的分享文案，即可查询优惠与预计返现。价格和优惠以实际下单为准。'
       else if (content.trim() === '/支持平台') reply = `当前已接入：${listPlatforms().map((p) => p.name).join('、')}。\n淘宝联盟正在接入，暂不支持转链。各平台可用性取决于实际接口权限。`
@@ -177,13 +198,35 @@ export async function processInbox() {
       else if (content.includes('https://')) {
         try {
           const p = await convert(content, id, message.id, id)
-          reply = `商品转链成功\n${p.product}\n商品售价：${p.price === null ? '待确认' : `¥${(p.price / 100).toFixed(2)}`}\n优惠券：暂无可确认优惠券\n返现：待确认（订单归属待验证）\n推广链接：${p.promotionUrl}\n价格与返现以实际订单及联盟结算为准。`
+          const known = p.product !== '商品信息暂不可用'
+          // 图文卡片：商品图 + 价格摘要，点击卡片直接打开推广链接
+          reply = {
+            title: known ? p.product : '京东商品 · 转链成功',
+            description: [
+              `售价：${yuan(p.price)}`,
+              `优惠券：${p.coupon ? yuan(p.coupon) : p.coupon === 0 ? '无' : '待确认'}`,
+              p.finalPrice != null ? `预计到手：${yuan(p.finalPrice)}` : null,
+              `预计返现：${p.rebate != null ? yuan(p.rebate) : '待确认'}（以联盟结算为准）`,
+              !known && p.infoMessage ? `商品信息未获取：${p.infoMessage}` : null,
+              '👉 点击卡片前往购买',
+            ].filter(Boolean).join('\n'),
+            url: p.promotionUrl,
+            picurl: p.imageUrl || undefined,
+          }
         } catch (e) {
           reply = e instanceof Error ? e.message : '转链失败，请稍后重试。'
         }
       }
       console.log(`[企业微信] ${sender}：${content.trim().slice(0, 60)}`)
-      await send(await readConfig('wecom'), sender, reply)
+      const wecom = await readConfig('wecom')
+      try {
+        await send(wecom, sender, reply)
+      } catch (e) {
+        if (typeof reply === 'string') throw e
+        // 图文发送失败时退回纯文本，保证用户能拿到链接
+        console.warn(`[企业微信] 图文消息发送失败，改发文本：${e instanceof Error ? e.message : e}`)
+        await send(wecom, sender, `${reply.title}\n${reply.description.replace('👉 点击卡片前往购买', '')}推广链接：${reply.url}`)
+      }
       console.log(`[企业微信] 已回复 ${sender}`)
       await db.incomingMessage.update({
         where: { id: message.id },

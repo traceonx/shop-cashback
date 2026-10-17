@@ -246,7 +246,8 @@ export const jdPlugin: PlatformPlugin = {
     if (c.positionId) req.positionId = c.positionId
     if (trackingCode) req.subUnionId = trackingCode
     const response = await jdRequest(c, 'jd.union.open.promotion.common.get', { promotionCodeReq: req })
-    let link = response?.clickURL || response?.shortURL
+    // 优先短链（u.jd.com），便于在消息与后台展示
+    let link = response?.shortURL || response?.clickURL
     if (typeof link !== 'string' || link === url) throw new BadRequestException('京东未返回有效推广链接')
     const parsed = new URL(link)
     if (
@@ -315,7 +316,7 @@ export const jdPlugin: PlatformPlugin = {
           const couponResponse = await jdRequest(c, 'jd.union.open.promotion.common.get', {
             promotionCodeReq: { ...req, couponUrl: best.link },
           })
-          const couponLink = couponResponse?.clickURL || couponResponse?.shortURL
+          const couponLink = couponResponse?.shortURL || couponResponse?.clickURL
           const target = new URL(couponLink)
           if (
             target.protocol !== 'https:' ||
