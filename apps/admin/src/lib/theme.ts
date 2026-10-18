@@ -30,7 +30,7 @@ export function useTheme() {
     }
   }, [mode])
   const next = () => setMode((m) => (m === 'system' ? 'light' : m === 'light' ? 'dark' : 'system'))
-  return { mode, next }
+  return { mode, next, setMode }
 }
 
 // 首屏前应用已保存的主题，避免闪烁

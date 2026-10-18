@@ -251,8 +251,28 @@ class AdminController {
     return { data: { changed: true } }
   }
 
-  @Get('auth/profile') profile(@Req() req: AuthRequest) {
-    return { data: req.actor }
+  @Get('auth/profile') async profile(@Req() req: AuthRequest) {
+    const row = await db.systemConfig.findUnique({ where: { key: 'profile:' + req.actor!.id } })
+    const extra = (row?.value as { nickname?: string; avatar?: string | null } | undefined) || {}
+    return { data: { ...req.actor, nickname: extra.nickname || '', avatar: extra.avatar || null } }
+  }
+  /** 个人信息：昵称与头像（头像由前端压缩为 ≤256px 的 data URL） */
+  @Put('auth/profile') async updateProfile(@Body() body: { nickname?: unknown; avatar?: unknown }, @Req() req: AuthRequest) {
+    const key = 'profile:' + req.actor!.id
+    const row = await db.systemConfig.findUnique({ where: { key } })
+    const current = (row?.value as { nickname?: string; avatar?: string | null } | undefined) || {}
+    const next = { ...current }
+    if (body?.nickname !== undefined) {
+      if (typeof body.nickname !== 'string' || body.nickname.trim().length > 30) throw new BadRequestException('昵称最多 30 个字')
+      next.nickname = body.nickname.trim()
+    }
+    if (body?.avatar !== undefined) {
+      if (body.avatar !== null && (typeof body.avatar !== 'string' || !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(body.avatar) || body.avatar.length > 120000))
+        throw new BadRequestException('头像格式不正确或文件过大')
+      next.avatar = body.avatar as string | null
+    }
+    await db.systemConfig.upsert({ where: { key }, create: { key, value: next }, update: { value: next, version: { increment: 1 } } })
+    return { data: { ...req.actor, nickname: next.nickname || '', avatar: next.avatar || null } }
   }
   @Get('dashboard/overview') async overview() {
     return { data: await business.overview() }

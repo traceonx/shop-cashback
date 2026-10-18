@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Gift, KeyRound, LogIn, User } from 'lucide-react'
+import { KeyRound, LogIn, User } from 'lucide-react'
 import { api, auth } from '../lib/api'
 import { errorText } from '../lib/format'
 import { Alert, Button, Card, TextField } from '../ui'
@@ -53,9 +53,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
     <div className="login">
       <Card className="login-card">
         <div className="login-brand">
-          <span className="nav-logo">
-            <Gift size={18} />
-          </span>
+          <img className="nav-logo" src="/logo.svg" alt="" />
           <span className="nav-brand">拾惠</span>
         </div>
         <h1>{creating ? '创建管理员账号' : '欢迎回来'}</h1>

@@ -269,7 +269,7 @@
 }
 .phone {
   position: sticky;
-  top: calc(var(--navbar-height) + 12px);
+  top: 12px;
   display: flex;
   flex-direction: column;
   height: 460px;
