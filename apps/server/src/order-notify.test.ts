@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { orderNews, splitTitle } from './wecom'
+import { orderEventKind } from './order-sync'
 
 test('拆分商品标题末尾的【标签】', () => {
   assert.deepEqual(splitTitle('皇家猫粮 室内老年猫粮 3.5KG【宠物金选】'), { name: '皇家猫粮 室内老年猫粮 3.5KG', tag: '宠物金选' })
@@ -35,4 +36,15 @@ test('我的返现账户文本：图标 + 对齐金额', async () => {
     text,
     ['💼 我的返现账户', '────────────', '💰 可提现　  ¥0.00', '📄 待结算　  ¥6.20', '❄️ 冻结　　  ¥0.00', '📊 累计提现  ¥123.45'].join('\n'),
   )
+})
+
+test('待付款不通知，付款后才算下单成功', () => {
+  assert.equal(orderEventKind(undefined, 'CREATED'), null)
+  assert.equal(orderEventKind('CREATED', 'PAID'), 'created')
+  assert.equal(orderEventKind(undefined, 'PAID'), 'created')
+  assert.equal(orderEventKind('PAID', 'PAID'), null)
+  assert.equal(orderEventKind('PAID', 'COMPLETED'), 'completed')
+  assert.equal(orderEventKind('CREATED', 'CANCELLED'), null)
+  assert.equal(orderEventKind(undefined, 'CANCELLED'), null)
+  assert.equal(orderEventKind('PAID', 'CANCELLED'), 'cancelled')
 })

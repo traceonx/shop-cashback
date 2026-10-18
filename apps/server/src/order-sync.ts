@@ -19,6 +19,17 @@ type Cursor = {
   /** 自动同步生成的任务（定期清理） */
   auto?: boolean
 }
+/**
+ * 订单状态变化对应的用户通知：
+ * 待付款不通知；付款后才算「下单成功」；已付款后取消才通知取消，未付款就关闭的订单不打扰用户。
+ */
+export function orderEventKind(prev: string | undefined, next: string): OrderEvent['kind'] | null {
+  if (prev === next) return null
+  if (next === 'PAID') return prev === 'COMPLETED' ? null : 'created'
+  if (next === 'COMPLETED') return 'completed'
+  if (next === 'CANCELLED') return prev === 'PAID' || prev === 'COMPLETED' ? 'cancelled' : null
+  return null
+}
 export async function startOrderSync(
   actor: string,
   trace: string,
@@ -213,9 +224,7 @@ async function processOrderStep(): Promise<boolean> {
             const notifyUser = owner || existing?.userId
             const recent = Date.now() - row.placedAt.getTime() < (existing ? 30 : 2) * 86400000
             if (notifyUser && recent && existing?.status !== row.status) {
-              const kind = ({ CREATED: 'created', PAID: existing ? 'paid' : 'created', COMPLETED: 'completed', CANCELLED: 'cancelled' } as const)[
-                row.status as 'CREATED' | 'PAID' | 'COMPLETED' | 'CANCELLED'
-              ]
+              const kind = orderEventKind(existing?.status, row.status)
               if (kind)
                 events.push({
                   userId: notifyUser,

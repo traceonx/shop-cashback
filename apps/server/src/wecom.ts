@@ -115,7 +115,7 @@ const yuan = (cents: number | null | undefined) => (cents == null ? '待确认' 
 
 export type OrderEvent = {
   userId: string
-  kind: 'created' | 'paid' | 'completed' | 'cancelled'
+  kind: 'created' | 'completed' | 'cancelled'
   platform: string
   title: string
   amountCents: number | null
@@ -126,7 +126,6 @@ export type OrderEvent = {
 const platformName: Record<string, string> = { jd: '京东', taobao: '淘宝' }
 const orderHead = {
   created: '✅ 下单成功，已记录返利',
-  paid: '💳 订单已付款',
   completed: '🎉 订单已完成，返现进入待结算',
   cancelled: '❌ 订单已取消，本单不产生返现',
 }
@@ -178,7 +177,8 @@ async function totalRebate(userId: string, basisPoints: number, unsettledOnly = 
   for (const o of orders) {
     const plugin = listPlatforms().find((p) => p.id === o.platform)
     const status = o.status === 'UNATTRIBUTED' && plugin ? plugin.orderStatus(o.rawStatus || '') : o.status
-    if (status === 'CANCELLED') continue
+    // 已取消、未付款的订单不计入返利
+    if (status === 'CANCELLED' || status === 'CREATED') continue
     if (o.rebateCents != null) {
       if (!unsettledOnly) sum += Number(o.rebateCents)
       continue

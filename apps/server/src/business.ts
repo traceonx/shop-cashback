@@ -10,6 +10,8 @@ export async function settings() {
   return (row?.value as { ratio: number; minimum: number } | undefined) || { ratio: 70, minimum: 10 }
 }
 /** 订单当前状态：待核实归属的订单按平台原始状态换算 */
+/** 计入订单统计：已付款及之后的有效订单 */
+const counted = (status: string) => status !== 'CANCELLED' && status !== 'CREATED'
 function orderStatus(o: { platform: string; status: string; rawStatus: string | null }) {
   if (o.status !== 'UNATTRIBUTED') return o.status
   try {
@@ -31,8 +33,8 @@ export async function overview() {
     }),
     db.walletAccount.aggregate({ _sum: { pendingCents: true, withdrawnCents: true } }),
   ])
-  // 已取消的订单不计入今日订单与预估佣金
-  const valid = todayOrders.filter((o) => orderStatus(o) !== 'CANCELLED')
+  // 已取消、未付款的订单不计入今日订单与预估佣金
+  const valid = todayOrders.filter((o) => counted(orderStatus(o)))
   return {
     conversions,
     successRate: conversions ? Math.round((success / conversions) * 1000) / 10 : 0,
@@ -49,7 +51,7 @@ export async function trends(days: number) {
   const start = new Date(end.getTime() - (days - 1) * 86400000)
   const records = (
     await db.affiliateOrder.findMany({ where: { placedAt: { gte: start } }, select: { placedAt: true, platform: true, status: true, rawStatus: true } })
-  ).filter((o) => orderStatus(o) !== 'CANCELLED')
+  ).filter((o) => counted(orderStatus(o)))
   const counts = new Map<string, number>()
   for (const r of records) {
     const key = dateText(r.placedAt).slice(0, 10)
