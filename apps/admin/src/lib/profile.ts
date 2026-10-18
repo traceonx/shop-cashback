@@ -36,23 +36,25 @@ export const roleName = (role?: string) => (role === 'SUPER_ADMIN' || role === '
 
 /** 读取图片并压缩为不超过 256px 的 WebP data URL（体积通常 < 60KB） */
 export async function compressAvatar(file: File): Promise<string> {
-  const url = URL.createObjectURL(file)
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const i = new Image()
-      i.onload = () => resolve(i)
-      i.onerror = () => reject(new Error('无法读取图片'))
-      i.src = url
-    })
-    const size = 256
-    const scale = Math.min(1, size / Math.max(img.width, img.height))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.round(img.width * scale)
-    canvas.height = Math.round(img.height * scale)
-    canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
-    const webp = canvas.toDataURL('image/webp', 0.85)
-    return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/jpeg', 0.85)
-  } finally {
-    URL.revokeObjectURL(url)
-  }
+  // 用 FileReader 读成 data URL（站点 CSP 不允许 blob: 图片）
+  const source = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('无法读取图片文件'))
+    reader.readAsDataURL(file)
+  })
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const i = new Image()
+    i.onload = () => resolve(i)
+    i.onerror = () => reject(new Error('图片格式无法识别，请换一张图片'))
+    i.src = source
+  })
+  const size = 256
+  const scale = Math.min(1, size / Math.max(img.width, img.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(img.width * scale))
+  canvas.height = Math.max(1, Math.round(img.height * scale))
+  canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
+  const webp = canvas.toDataURL('image/webp', 0.85)
+  return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/jpeg', 0.85)
 }

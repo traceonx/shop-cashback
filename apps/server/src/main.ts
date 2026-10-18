@@ -507,7 +507,7 @@ async function bootstrap() {
       contentSecurityPolicy: {
         directives: {
           // 商品图片来自京东等平台 CDN，需允许 HTTPS 图片。
-          imgSrc: ["'self'", 'data:', 'https:'],
+          imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
           // 允许通过 http://IP:端口 直接访问；否则浏览器会把脚本请求强制升级为 https 导致页面空白。
           upgradeInsecureRequests: null,
         },
