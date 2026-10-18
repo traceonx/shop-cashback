@@ -48,7 +48,10 @@ export async function topRequest(c: PlatformConfig, method: string, biz: Record<
   const err = data.error_response
   if (err) {
     const code = String(err.code ?? ''), sub = String(err.sub_code ?? '')
-    const detail = [topHints[code], err.sub_msg || err.msg].filter(Boolean).join('；')
+    // 缺权限时写明是哪个接口，方便到开放平台对照申请；scope ids 列表对排查无用，去掉
+    const hint = code === '11' ? `${topHints[code]}（接口 ${method}）` : topHints[code]
+    const raw = String(err.sub_msg || err.msg || '').replace(/;?\s*scope ids is[\d\s]*$/i, '')
+    const detail = [hint, code === '11' ? '' : raw].filter(Boolean).join('；')
     throw new TopError(code, sub, `淘宝联盟接口拒绝请求（${code}${sub ? '/' + sub : ''}）：${detail}`)
   }
   return data[`${method.replace(/^taobao\./, '').replaceAll('.', '_')}_response`] ?? data
@@ -271,6 +274,8 @@ export const taobaoPlugin: PlatformPlugin = {
         }
         found = parseMaterialSearch(rows, info.itemId || itemId, info.title)
       } catch (err) {
+        if (err instanceof TopError && err.code === '11')
+          throw new BadRequestException('淘宝转链需要「物料搜索」或「万能转链」权限，当前应用两者都未开通。请在淘宝联盟开放平台申请物料搜索权限（taobao.tbk.dg.material.optional.upgrade）')
         throw new BadRequestException(`商品${label}转链失败（物料搜索）：${(err as Error).message}`)
       }
       if (found.status === 'ambiguous') {
