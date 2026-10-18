@@ -103,7 +103,7 @@ async function send(c: Config, user: string, content: string | News) {
   const r = await fetch(wecomUrl(c, `cgi-bin/message/send?access_token=${encodeURIComponent(token)}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ touser: user, agentid: Number(c.agentId), ...body, enable_duplicate_check: 1, duplicate_check_interval: 1800 }),
+    body: JSON.stringify({ touser: user, agentid: Number(c.agentId), ...body }),
     signal: AbortSignal.timeout(10000),
     redirect: 'error',
   })
@@ -231,7 +231,8 @@ export async function processInbox() {
         console.warn(`[企业微信] 图文消息发送失败，改发文本：${e instanceof Error ? e.message : e}`)
         await send(wecom, sender, `${reply.title}\n${reply.description.replace('👉 点击卡片前往购买', '')}推广链接：${reply.url}`)
       }
-      console.log(`[企业微信] 已回复 ${sender}`)
+      const summary = (typeof reply === 'string' ? reply : `[图文] ${reply.title}`).replace(/\s+/g, ' ').slice(0, 60)
+      console.log(`[企业微信] 已回复 ${sender}：${summary}`)
       await db.incomingMessage.update({
         where: { id: message.id },
         data: { status: 'COMPLETED', lockedUntil: null, errorCode: null },
