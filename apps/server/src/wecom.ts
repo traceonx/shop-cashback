@@ -83,15 +83,12 @@ function clip(text: string, bytes: number) {
   }
   return out + '…'
 }
-type Card = { template_card: Record<string, unknown> }
-async function send(c: Config, user: string, content: string | News | Card) {
+async function send(c: Config, user: string, content: string | News) {
   const token = await wecomToken(c)
   const body =
     typeof content === 'string'
       ? { msgtype: 'text', text: { content } }
-      : 'template_card' in content
-        ? { msgtype: 'template_card', template_card: content.template_card }
-        : {
+      : {
           msgtype: 'news',
           news: {
             articles: [
@@ -140,39 +137,23 @@ export function splitTitle(title: string) {
   return m ? { name: m[1], tag: m[2] } : { name: title, tag: '' }
 }
 /**
- * 订单通知卡片（企业微信模板卡片）：
- * 有商品图时用图文卡片（左图右文 + 累计返利），没有图时用文本卡片（累计返利大字突出）。
+ * 订单通知：图文消息（商品图 + 标题 + 明细），个人微信里的企业微信插件也能正常显示。
+ * 注意：模板卡片（template_card）在微信插件中不显示，接口却返回成功，所以不用。
  */
-export function orderCard(e: OrderEvent, rebate: number, total: number) {
-  const { name, tag } = splitTitle(e.title)
+export function orderNews(e: OrderEvent, rebate: number, total: number): News {
   const cancelled = e.kind === 'cancelled'
-  const rows = [
-    { keyname: '平台', value: platformName[e.platform] || e.platform },
-    ...(e.amountCents ? [{ keyname: '金额', value: yuan(e.amountCents) }] : []),
-    { keyname: '本单返现', value: cancelled ? '¥0.00' : yuan(rebate) },
-  ]
-  const common = {
-    source: { desc: '拾惠' },
-    main_title: { title: clip(orderHead[e.kind], 72) },
-    horizontal_content_list: rows,
-    card_action: { type: 1, url: e.url || 'https://www.jd.com' },
-  }
-  if (e.imageUrl)
-    return {
-      template_card: {
-        card_type: 'news_notice',
-        ...common,
-        image_text_area: { type: 0, title: clip(name, 100), desc: tag || platformName[e.platform] || '', image_url: e.imageUrl },
-        vertical_content_list: [{ title: `累计返利 ${yuan(total)}`, desc: cancelled ? '本单已取消，不计入累计返利' : '含本单，确认收货后进入待结算' }],
-      },
-    }
+  const lines = [
+    e.title,
+    `平台：${platformName[e.platform] || e.platform}`,
+    e.amountCents ? `金额：${yuan(e.amountCents)}` : null,
+    `本单返现：${cancelled ? '¥0.00' : yuan(rebate)}`,
+    `累计返利：${yuan(total)}`,
+  ].filter(Boolean)
   return {
-    template_card: {
-      card_type: 'text_notice',
-      ...common,
-      emphasis_content: { title: yuan(total), desc: '累计返利' },
-      sub_title_text: clip(tag ? `${name} · ${tag}` : name, 160),
-    },
+    title: orderHead[e.kind],
+    description: lines.join('\n'),
+    url: e.url || 'https://www.jd.com',
+    ...(e.imageUrl ? { picurl: e.imageUrl } : {}),
   }
 }
 /** 用户当前累计返利（未取消订单的预计返现之和，比例优先取下单快照） */
@@ -206,21 +187,7 @@ export async function notifyOrder(e: OrderEvent) {
   const basisPoints = rule?.basisPoints ?? Math.round((await settings()).ratio * 100)
   const rebate = e.commissionCents == null ? 0 : Math.floor((e.commissionCents * basisPoints) / 10000)
   const total = await totalRebate(e.userId, basisPoints)
-  try {
-    await send(wecom, identity.externalUserId, orderCard(e, rebate, total))
-  } catch (err) {
-    // 模板卡片不可用（如旧版客户端 / 接口限制）时退回纯文本
-    console.warn(`[企业微信] 订单卡片发送失败，改发文本：${err instanceof Error ? err.message : err}`)
-    const lines = [
-      orderHead[e.kind],
-      `商品：${e.title}`,
-      `平台：${platformName[e.platform] || e.platform}`,
-      e.amountCents ? `金额：${yuan(e.amountCents)}` : null,
-      `本单返现：${e.kind === 'cancelled' ? '¥0.00' : yuan(rebate)}`,
-      `累计返利：${yuan(total)}`,
-    ].filter(Boolean)
-    await send(wecom, identity.externalUserId, lines.join('\n'))
-  }
+  await send(wecom, identity.externalUserId, orderNews(e, rebate, total))
   console.log(`[企业微信] 已通知 ${identity.externalUserId}：${orderHead[e.kind]}`)
 }
 let running = false
