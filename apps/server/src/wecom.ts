@@ -155,8 +155,20 @@ export function orderNews(e: OrderEvent, rebate: number, total: number): News {
     ...(e.imageUrl ? { picurl: e.imageUrl } : {}),
   }
 }
+/** 「我的返现账户」文本：企业微信文本消息不支持样式，用图标 + 对齐排版 */
+export function accountText(a: { available: number; pending: number; frozen: number; withdrawn: number }) {
+  const row = (icon: string, label: string, cents: number) => `${icon} ${label.padEnd(4, '\u3000')}  ${yuan(cents)}`
+  return [
+    '💼 我的返现账户',
+    '────────────',
+    row('💰', '可提现', a.available),
+    row('📄', '待结算', a.pending),
+    row('❄️', '冻结', a.frozen),
+    row('📊', '累计提现', a.withdrawn),
+  ].join('\n')
+}
 /** 用户当前累计返利（未取消订单的预计返现之和，比例优先取下单快照） */
-async function totalRebate(userId: string, basisPoints: number) {
+async function totalRebate(userId: string, basisPoints: number, unsettledOnly = false) {
   const orders = await db.affiliateOrder.findMany({
     where: { userId },
     select: { platform: true, status: true, rawStatus: true, rawData: true, commissionCents: true, rebateCents: true, ruleSnapshot: true },
@@ -167,7 +179,7 @@ async function totalRebate(userId: string, basisPoints: number) {
     const status = o.status === 'UNATTRIBUTED' && plugin ? plugin.orderStatus(o.rawStatus || '') : o.status
     if (status === 'CANCELLED') continue
     if (o.rebateCents != null) {
-      sum += Number(o.rebateCents)
+      if (!unsettledOnly) sum += Number(o.rebateCents)
       continue
     }
     const commission = plugin?.orderAmounts(o.rawData).commission ?? (o.commissionCents == null ? null : Number(o.commissionCents))
@@ -239,10 +251,19 @@ export async function processInbox() {
       else if (content.trim() === '/支持平台') reply = `当前已接入：${listPlatforms().map((p) => p.name).join('、')}。\n直接发送商品链接或分享文案即可查询优惠与返现。各平台可用性取决于实际接口权限。`
       else if (content.trim() === '/余额') {
         const w = await db.walletAccount.findUnique({ where: { userId: id } })
-        const amount = (n?: bigint) => `${(Number(n || 0n) / 100).toFixed(2)}`
-        reply = `我的返现账户\n可提现：¥${amount(w?.availableCents)}\n待结算：¥${amount(w?.pendingCents)}\n冻结：¥${amount(w?.frozenCents)}\n累计提现：¥${amount(w?.withdrawnCents)}`
+        const rule = await db.rebateRule.findFirst({ where: { scopeKey: 'user:' + id } })
+        // 待结算 = 钱包里待结算金额 + 尚未入账订单的预计返现（已取消的不算）
+        const pending = Number(w?.pendingCents || 0n) + (await totalRebate(id, rule?.basisPoints ?? Math.round((await settings()).ratio * 100), true))
+        reply = accountText({
+          available: Number(w?.availableCents || 0n),
+          pending,
+          frozen: Number(w?.frozenCents || 0n),
+          withdrawn: Number(w?.withdrawnCents || 0n),
+        })
         const entries = w ? await db.walletTransaction.findMany({ where: { walletId: w.id }, orderBy: { createdAt: 'desc' }, take: 5 }) : []
-        reply += entries.length ? '\n\n最近流水\n' + entries.map((entry) => `${entry.reason} ${entry.deltaCents > 0n ? '+' : ''}¥${amount(entry.deltaCents)} · ${dateText(entry.createdAt)}`).join('\n') : '\n\n暂无资金流水。'
+        reply += entries.length
+          ? '\n\n最近流水\n' + entries.map((entry) => `${entry.reason}  ${entry.deltaCents > 0n ? '+' : ''}${yuan(Number(entry.deltaCents))} · ${dateText(entry.createdAt)}`).join('\n')
+          : '\n\n暂无资金流水。'
       } else if (/^\/订单(?: \d+)?$/.test(content.trim()) || content.trim() === '/待结算') {
         const take = Math.min(20, Math.max(1, Number(content.split(' ')[1] || 5)))
         const pendingOnly = content.trim() === '/待结算'

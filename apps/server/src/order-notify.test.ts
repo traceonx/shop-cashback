@@ -24,3 +24,12 @@ test('订单通知用图文消息：带商品图与累计返利，金额为 0 �
   assert.match(cancelled.description, /累计返利：¥0\.00/)
   assert.equal(cancelled.picurl, undefined)
 })
+
+test('我的返现账户文本：图标 + 对齐金额', async () => {
+  const { accountText } = await import('./wecom')
+  const text = accountText({ available: 0, pending: 620, frozen: 0, withdrawn: 12345 })
+  assert.equal(
+    text,
+    ['💼 我的返现账户', '────────────', '💰 可提现　  ¥0.00', '📄 待结算　  ¥6.20', '❄️ 冻结　　  ¥0.00', '📊 累计提现  ¥123.45'].join('\n'),
+  )
+})
