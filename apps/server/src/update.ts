@@ -7,6 +7,7 @@ import { hostname } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { BadRequestException, ConflictException, ServiceUnavailableException } from '@nestjs/common'
 import { version as appVersion } from './version'
+import { outboundFetch } from './proxy'
 
 const socketPath = process.env.UPDATE_DOCKER_SOCKET || '/var/run/docker.sock'
 const watchtowerImage = process.env.UPDATE_WATCHTOWER_IMAGE || 'containrrr/watchtower:latest'
@@ -162,7 +163,7 @@ async function latestVersion(repo: string) {
     const [namespace, name] = repo.includes('/') ? repo.split('/') : ['library', repo]
     // UPDATE_HUB_API：可选，hub.docker.com 的反向代理基址（与企业微信代理同理），国内网络无法直连时使用
     const base = (process.env.UPDATE_HUB_API || 'https://hub.docker.com').replace(/\/+$/, '')
-    const res = await fetch(`${base}/v2/namespaces/${namespace}/repositories/${name}/tags?page_size=100&ordering=last_updated`, { signal: AbortSignal.timeout(10000) })
+    const res = await outboundFetch('dockerhub', `${base}/v2/namespaces/${namespace}/repositories/${name}/tags?page_size=100&ordering=last_updated`, { signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`Docker Hub HTTP ${res.status}`)
     const tags = ((await res.json()) as { results?: { name: string }[] }).results || []
     const versions = tags.map((t) => t.name).filter((t) => /^\d+\.\d+\.\d+$/.test(t))

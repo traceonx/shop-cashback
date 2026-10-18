@@ -7,6 +7,7 @@ services:
     container_name: shop-cashback
     environment:
       UPDATE_CONTAINER: shop-cashback   # 一键更新时用于识别本容器，需与 container_name 一致
+      # PROXY_HOST: http://192.168.5.199:7890   # 可选：境外请求代理（Docker Hub 版本查询、Telegram），mihomo 需开启 allow-lan
     ports:
       - "8081:3001"
     volumes:
