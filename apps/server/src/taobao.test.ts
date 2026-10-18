@@ -140,3 +140,28 @@ test('详情接口失败时用分享文案标题走物料搜索', async () => {
     globalThis.fetch = original
   }
 })
+
+test('短链落地页标题提取，过滤登录 / 通用标题', async () => {
+  const { titleFromHtml } = await import('./platforms/taobao')
+  assert.equal(titleFromHtml('<html><head><title>Mistine蜜丝婷小果泥唇霜-淘宝网</title></head></html>'), 'Mistine蜜丝婷小果泥唇霜')
+  assert.equal(titleFromHtml('<meta property="og:title" content="夏季纯棉短袖T恤男">'), '夏季纯棉短袖T恤男')
+  assert.equal(titleFromHtml('<title>淘宝网 - 淘！我喜欢</title>'), null)
+  assert.equal(titleFromHtml('<title>登录</title>'), null)
+})
+
+test('数字商品 ID 被拒（-4003）且无标题时，提示发送完整分享文案', async () => {
+  const original = globalThis.fetch
+  try {
+    globalThis.fetch = async (_url, options) => {
+      const method = (options!.body as URLSearchParams).get('method')
+      if (method === 'taobao.tbk.item.info.upgrade.get') return new Response(JSON.stringify({ error_response: { code: 15, msg: 'Remote service error', sub_code: '-4003', sub_msg: '您输入的商品ID不合法，请使用升级后的新商品ID' } }))
+      return new Response(JSON.stringify({ error_response: { code: 11, sub_code: 'isv.permission-api-package-limit' } }))
+    }
+    await assert.rejects(
+      taobaoPlugin.convert({ appKey: 'k', appSecret: 's', pid: 'mm_1_2_3', adzoneId: '3' }, 'https://item.taobao.com/item.htm?id=1'),
+      /不支持用链接中的数字商品 ID.*完整分享文案/,
+    )
+  } finally {
+    globalThis.fetch = original
+  }
+})
