@@ -95,3 +95,21 @@ export async function autoPublishMenu(actor: string, trace: string) {
     return `应用菜单自动发布失败：${e instanceof Error ? e.message : e}，可在下方「应用菜单」手动发布`
   }
 }
+
+/**
+ * 已发布的菜单里含有已下线的动作（如「订单找回」）时，启动后自动重新发布清理后的菜单，
+ * 企业微信里的旧入口随之消失，不用手动去后台点发布。
+ */
+export async function republishStaleMenu() {
+  const row = await db.systemConfig.findUnique({ where: { key: 'wecom:menu:published' } })
+  const draft = (row?.value as { draft?: MenuDraft } | null)?.draft
+  if (!Array.isArray(draft) || draft.every((g) => (g.children || []).every((c) => Object.hasOwn(menuActions, c.action)))) return
+  const menu = sanitize(draft) || defaultMenu
+  try {
+    await db.systemConfig.upsert({ where: { key: 'wecom:menu:draft' }, create: { key: 'wecom:menu:draft', value: json(menu) }, update: { value: json(menu) } })
+    await publishMenu(menu, 'system', 'menu-cleanup')
+    console.log('[企业微信] 已移除下线的菜单入口并重新发布应用菜单')
+  } catch (e) {
+    console.warn(`[企业微信] 菜单自动清理失败：${e instanceof Error ? e.message : e}，请在通知配置 → 应用菜单中手动发布`)
+  }
+}

@@ -268,6 +268,11 @@ export async function processInbox() {
       } else if (/^\/订单(?: \d+)?$/.test(content.trim()) || content.trim() === '/待结算') {
         const take = Math.min(20, Math.max(1, Number(content.split(' ')[1] || 5)))
         const pendingOnly = content.trim() === '/待结算'
+        // 查看全部订单前先立即同步一次，确保刚下的单能查到（动态导入避免与 order-sync 循环依赖）
+        if (!pendingOnly) {
+          const { syncOrdersNow } = await import('./order-sync')
+          await syncOrdersNow().catch((e) => console.warn(`[订单同步] 查询前同步失败：${e instanceof Error ? e.message : e}`))
+        }
         const plugins = listPlatforms()
         // 按平台原始状态换算当前状态；已取消的订单不展示
         const rows = (

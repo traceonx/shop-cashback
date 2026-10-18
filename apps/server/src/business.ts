@@ -1,3 +1,4 @@
+import { wakeAutoSync } from './auto-sync'
 import { randomBytes } from 'node:crypto'
 import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
@@ -139,6 +140,8 @@ export async function convert(content: string, actor: string, trace: string, use
       data: { status: 'SUCCESS', promotionUrl: link, productSnapshot: json(snapshot) },
     })
     await audit(actor, '商品转链', record.id, trace, { status: 'SUCCESS' })
+    // 用户转链后 5 分钟内是下单高峰，立刻加快订单同步
+    if (userId) wakeAutoSync()
     return {
       ...snapshot,
       id: record.id,

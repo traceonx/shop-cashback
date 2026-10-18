@@ -7,15 +7,19 @@ const MIN = 60 * SEC
 /** 最近转链活跃度：最后一次转链时间、近 2 小时转链的人数 */
 export type Activity = { lastConversionAt: Date | null; activeUsers: number }
 
+/** 高峰期间隔：用户转链后 5 分钟内很可能下单，每 5 秒同步一次 */
+export const PEAK_DELAY = 5 * SEC
+
 /**
  * 根据转链活跃度决定下一次自动同步订单的间隔（毫秒）：
- * 刚有人转链（很可能马上下单）时每 15 秒同步，下单后尽快通知；转链人很多时放宽到 30 秒，避免触发联盟接口限频；
- * 之后随空闲时间逐步放慢，最长 10 分钟，节省接口调用。
+ * - 转链后 5 分钟内为高峰期：5 秒（转链人数 ≥10 时 10 秒，避免触发联盟接口限频），下单后尽快通知；
+ * - 之后逐步放慢：30 分钟内 30 秒，2 小时内 60 秒，24 小时内 5 分钟，更久 10 分钟，节省接口调用。
  */
 export function syncDelay(a: Activity, now = Date.now()) {
   if (!a.lastConversionAt) return 600 * SEC
   const idle = now - a.lastConversionAt.getTime()
-  if (idle < 30 * MIN) return a.activeUsers >= 10 ? 30 * SEC : 15 * SEC
+  if (idle < 5 * MIN) return a.activeUsers >= 10 ? 10 * SEC : PEAK_DELAY
+  if (idle < 30 * MIN) return 30 * SEC
   if (idle < 2 * 60 * MIN) return 60 * SEC
   if (idle < 24 * 60 * MIN) return 300 * SEC
   return 600 * SEC
@@ -44,22 +48,38 @@ async function cleanup() {
     where: { status: 'COMPLETED', cursor: { path: ['auto'], equals: true }, finishedAt: { lt: new Date(Date.now() - 24 * 60 * MIN) } },
   })
 }
+let timer: NodeJS.Timeout | null = null
+let nextAt = 0
+function schedule(delay: number) {
+  if (timer) clearTimeout(timer)
+  nextAt = Date.now() + delay
+  timer = setTimeout(() => void run(), delay)
+  timer.unref()
+}
+async function run() {
+  timer = null
+  let delay = 600 * SEC
+  try {
+    await autoSyncOrders()
+    await cleanup().catch(() => undefined)
+    const a = await activity()
+    delay = syncDelay(a)
+    if (delay !== lastDelay)
+      console.info(`[订单同步] 自动同步间隔调整为 ${delay / SEC} 秒（近 2 小时 ${a.activeUsers} 人转链）`)
+    lastDelay = delay
+  } catch {
+    console.error('自动同步订单失败')
+  }
+  schedule(delay)
+}
+
 /** 启动自动同步：首次在启动 1 分钟后执行，之后按活跃度动态安排下一次 */
 export function startAutoSync() {
-  const run = async () => {
-    let delay = 600 * SEC
-    try {
-      await autoSyncOrders()
-      await cleanup().catch(() => undefined)
-      const a = await activity()
-      delay = syncDelay(a)
-      if (delay !== lastDelay)
-        console.info(`[订单同步] 自动同步间隔调整为 ${delay / SEC} 秒（近 2 小时 ${a.activeUsers} 人转链）`)
-      lastDelay = delay
-    } catch {
-      console.error('自动同步订单失败')
-    }
-    setTimeout(() => void run(), delay).unref()
-  }
-  setTimeout(() => void run(), MIN).unref()
+  schedule(MIN)
+}
+
+/** 用户转链成功后立刻进入高峰期：下一次同步提前到 5 秒内 */
+export function wakeAutoSync() {
+  if (!timer || nextAt - Date.now() <= PEAK_DELAY) return
+  schedule(PEAK_DELAY)
 }

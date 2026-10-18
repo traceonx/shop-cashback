@@ -37,7 +37,7 @@ import jwt from 'jsonwebtoken'
 import { randomUUID } from 'node:crypto'
 import helmet from 'helmet'
 import { db, audit, centsNumber, dateText } from './database'
-import { getMenu, saveMenu, publishMenu } from './wecom-menu'
+import { getMenu, saveMenu, publishMenu, republishStaleMenu } from './wecom-menu'
 import { env, requireEnv } from './config'
 import { hashPassword, verifyPassword } from './security'
 import * as business from './business'
@@ -574,6 +574,8 @@ async function bootstrap() {
   orderTimer.unref()
   // 自动同步最近订单：按转链活跃度在 15 秒～10 分钟之间动态调整间隔
   startAutoSync()
+  // 清理企业微信菜单里已下线的入口（如订单找回）
+  setTimeout(() => void republishStaleMenu().catch(() => undefined), 30000).unref()
   // 自动更新（默认关闭）：每分钟对齐整分检查一次 cron 是否命中
   const autoUpdate = () => void autoUpdateTick().catch((e) => console.warn(`[一键更新] 自动更新检查失败：${e instanceof Error ? e.message : e}`))
   setTimeout(() => {

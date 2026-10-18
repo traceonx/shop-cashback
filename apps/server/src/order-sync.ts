@@ -282,6 +282,23 @@ async function processOrderStep(): Promise<boolean> {
 }
 
 /** 定时自动同步：每个已配置的联盟拉取最近 1 小时内有更新的订单（按更新时间），以便及时通知用户 */
+/**
+ * 立即同步最近 1 小时的订单并等待完成（用户查看「全部订单」时调用），最多等待 timeoutMs；
+ * 已有同步任务在跑时会等它结束。返回是否在时限内完成。
+ */
+export async function syncOrdersNow(timeoutMs = 8000) {
+  await autoSyncOrders()
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await processOrderSync()
+    const pending = await db.syncJob.count({
+      where: { status: { in: ['QUEUED', 'RUNNING'] }, cursor: { path: ['engine'], equals: 'platform-v1' } },
+    })
+    if (!pending) return true
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  return false
+}
 export async function autoSyncOrders() {
   for (const plugin of listPlatforms()) {
     try {
