@@ -71,7 +71,7 @@ export async function receiveCallback(query: Record<string, string>, body: strin
     update: {},
   })
 }
-type News = { title: string; description: string; url: string; picurl?: string }
+type News = { title: string; description: string; url: string; picurl?: string; followup?: string }
 // 按 UTF-8 字节截断（企业微信图文：标题 ≤128 字节，描述 ≤512 字节）
 function clip(text: string, bytes: number) {
   if (Buffer.byteLength(text) <= bytes) return text
@@ -158,8 +158,8 @@ export async function processInbox() {
       const id = identity.userId
       let reply: string | News = '发送商品链接查询优惠和预计返现。\n/订单 查看自己的订单\n/待结算 查看待结算订单\n/余额 查看账户金额\n/提现记录 查看提现进度\n订单同步可能延迟，返现以联盟结算为准；取消或退款可能影响返现。'
       if (!identity.user.enabled) reply = '当前账户已禁用，请联系管理员。'
-      else if (content.trim() === '/查返利') reply = '直接发送已接入平台的 HTTPS 商品链接或含链接的分享文案，即可查询优惠与预计返现。价格和优惠以实际下单为准。'
-      else if (content.trim() === '/支持平台') reply = `当前已接入：${listPlatforms().map((p) => p.name).join('、')}。\n淘宝联盟正在接入，暂不支持转链。各平台可用性取决于实际接口权限。`
+      else if (content.trim() === '/查返利') reply = '直接发送京东、淘宝 / 天猫商品链接或含链接的分享文案，即可查询优惠与预计返现。价格和优惠以实际下单为准。'
+      else if (content.trim() === '/支持平台') reply = `当前已接入：${listPlatforms().map((p) => p.name).join('、')}。\n直接发送商品链接或分享文案即可查询优惠与返现。各平台可用性取决于实际接口权限。`
       else if (content.trim() === '/订单找回') reply = '订单找回暂未开放。请联系管理员核查订单号，核验前不会自动绑定或发放返现。'
       else if (content.trim() === '/余额') {
         const w = await db.walletAccount.findUnique({ where: { userId: id } })
@@ -198,20 +198,23 @@ export async function processInbox() {
       else if (content.includes('https://')) {
         try {
           const p = await convert(content, id, message.id, id)
-          const known = p.product !== '商品信息暂不可用'
+          const known = !['商品信息暂不可用', '淘宝商品'].includes(p.product)
           // 图文卡片：商品图 + 价格摘要，点击卡片直接打开推广链接
           reply = {
-            title: known ? p.product : '京东商品 · 转链成功',
+            title: known ? p.product : `${p.category || '商品'} · 转链成功`,
             description: [
               `售价：${yuan(p.price)}`,
               `优惠券：${p.coupon ? yuan(p.coupon) : p.coupon === 0 ? '无' : '待确认'}`,
               p.finalPrice != null ? `预计到手：${yuan(p.finalPrice)}` : null,
               `预计返现：${p.rebate != null ? yuan(p.rebate) : '待确认'}（以联盟结算为准）`,
               !known && p.infoMessage ? `商品信息未获取：${p.infoMessage}` : null,
-              '👉 点击卡片前往购买',
+              p.password ? `淘口令：${p.password}` : null,
+              p.password ? '👉 点击卡片购买，或复制下一条消息打开手机淘宝' : '👉 点击卡片前往购买',
             ].filter(Boolean).join('\n'),
             url: p.promotionUrl,
             picurl: p.imageUrl || undefined,
+            // 淘口令单独发一条文本，方便长按复制后打开手机淘宝
+            followup: p.password ? `${p.password} 复制这条消息，打开手机淘宝即可领券购买` : undefined,
           }
         } catch (e) {
           reply = e instanceof Error ? e.message : '转链失败，请稍后重试。'
@@ -221,6 +224,7 @@ export async function processInbox() {
       const wecom = await readConfig('wecom')
       try {
         await send(wecom, sender, reply)
+        if (typeof reply !== 'string' && reply.followup) await send(wecom, sender, reply.followup)
       } catch (e) {
         if (typeof reply === 'string') throw e
         // 图文发送失败时退回纯文本，保证用户能拿到链接

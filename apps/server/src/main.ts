@@ -450,12 +450,11 @@ class AdminController {
     return { data: await saveConfig(provider(kind), body, req.actor!.id, req.traceId!) }
   }
   @Post('integrations/:kind/test') async testIntegration(@Param('kind') kind: string, @Req() req: AuthRequest) {
-    if (kind === 'taobao') throw new BadRequestException('淘宝联盟配置可保存，接口联调尚未启用')
     return { data: await testConnection(provider(kind), req.actor!.id, req.traceId!) }
   }
 }
 function provider(kind: string): Provider {
-  if (kind !== 'wecom' && kind !== 'taobao') platform(kind)
+  if (kind !== 'wecom') platform(kind)
   return kind
 }
 @Module({ controllers: [PublicController, AdminController], providers: [AuthGuard] })

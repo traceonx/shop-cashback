@@ -1,6 +1,5 @@
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common'
 import { platform, listPlatforms } from './platforms/registry'
-import { taobaoFields } from './platforms/taobao/config'
 export { decimalCents, jdDate, parseJdJson, jdSign, orderRows } from './platforms/jd'
 import { db, audit, dateText } from './database'
 import { decrypt, encrypt } from './security'
@@ -20,7 +19,7 @@ export const fields = {
 } as const
 export type Provider = string
 export type Config = Record<string, string>
-const configFields = (kind: string) => kind === 'wecom' ? fields.wecom : kind === 'taobao' ? taobaoFields : platform(kind).fields
+const configFields = (kind: string) => (kind === 'wecom' ? fields.wecom : platform(kind).fields)
 export async function readConfig(kind: Provider): Promise<Config> {
   if (kind !== 'wecom') {
     const c = await db.affiliateConfig.findUnique({ where: { accountId: `${kind}-primary` } })
@@ -42,7 +41,7 @@ export async function integrationStatus(kind: Provider) {
       configured: !!cfg[key],
     })),
     configured:
-      kind === 'taobao' ? !!(cfg.appKey && cfg.appSecret && cfg.pid) : kind !== 'wecom'
+      kind !== 'wecom'
         ? platform(kind).configured(cfg)
         : !!(cfg.corpId && cfg.agentId && cfg.secret && cfg.token && cfg.aesKey),
     test: test?.value || null,

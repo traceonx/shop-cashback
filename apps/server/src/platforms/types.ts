@@ -43,6 +43,7 @@ export interface PlatformPlugin {
       commission: number | null
       coupon: number | null
       payablePrice?: number | null
+      password?: string
       infoMessage?: string
       rebate: number | null
       finalPrice: number | null

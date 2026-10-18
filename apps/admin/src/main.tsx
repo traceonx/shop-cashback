@@ -1613,7 +1613,7 @@ function Conversion({ onClose, notify }: { onClose: () => void; notify: (s: stri
               autoFocus
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="粘贴 https://item.jd.com/… 或京东分享文案"
+              placeholder="粘贴京东、淘宝 / 天猫商品链接或分享文案"
               rows={5}
               maxLength={3000}
             />
@@ -1739,7 +1739,7 @@ function Integration({ kind, compact = false }: { kind: 'wecom' | 'jd' | 'taobao
   useEffect(() => {
     void load()
   }, [load])
-  const configStatus = kind === 'taobao' ? (data?.configured ? '已配置 · 待接入' : '待配置 · 待接入') : data?.test?.status === 'CONNECTED' ? '连接测试通过' : data?.configured ? '待验证' : '待配置'
+  const configStatus = data?.test?.status === 'CONNECTED' ? '连接测试通过' : data?.configured ? '待验证' : '待配置'
   const dirty = !!data && data.fields.some((f) => values[f.key] !== f.value)
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -1864,9 +1864,9 @@ function Integration({ kind, compact = false }: { kind: 'wecom' | 'jd' | 'taobao
                   </p>
                 )}
                 <div className="integration-footer">
-                  <button className="button" type="button" disabled={kind === 'taobao' || busy || dirty || !data.configured} onClick={test}>
+                  <button className="button" type="button" disabled={busy || dirty || !data.configured} onClick={test}>
                     <RefreshCw size={15} />
-                    {kind === 'taobao' ? '接口联调待启用' : kind === 'jd' ? '测试订单查询权限' : '测试已保存配置'}
+                    {kind === 'taobao' ? '测试接口权限' : kind === 'jd' ? '测试订单查询权限' : '测试已保存配置'}
                   </button>
                   <button className="primary" disabled={busy || !dirty}>
                     {busy ? <Loader2 className="spin" size={15} /> : <Check size={15} />}保存配置
@@ -1879,7 +1879,7 @@ function Integration({ kind, compact = false }: { kind: 'wecom' | 'jd' | 'taobao
         </form>
         <aside className="panel guide-card">
           <h2>接入说明</h2>
-          {kind === 'taobao' && <><p>凭证可先保存，转链、商品查询和订单同步尚未启用。</p><a className="button" href="https://developer.alibaba.com/docs/api.htm?apiId=65409" target="_blank" rel="noopener noreferrer">淘宝联盟接口文档 <ExternalLink size={15} /></a></>}
+          {kind === 'taobao' && <><p>已支持商品信息查询、万能转链（按商品 ID）与淘口令生成；订单同步待开通订单查询权限后接入。</p><a className="button" href="https://developer.alibaba.com/docs/api.htm?apiId=65409" target="_blank" rel="noopener noreferrer">淘宝联盟接口文档 <ExternalLink size={15} /></a></>}
           {kind === 'jd' && (
             <>
               <a className="button" href="https://union.jd.com/" target="_blank" rel="noopener noreferrer">
@@ -1903,10 +1903,10 @@ function Integration({ kind, compact = false }: { kind: 'wecom' | 'jd' | 'taobao
                 '订单归属未核实前，不会自动入账返现。',
               ]
             : kind === 'taobao' ? [
-                '填写淘宝开放平台应用的 AppKey 与 AppSecret。',
+                '填写淘宝联盟开放平台应用的 AppKey 与 AppSecret。',
                 '填写完整 PID，保存时自动提取推广位 ID。',
-                '链接和淘口令转链需核实对应场景权限。',
-                '保存凭证不代表接口已开通，后续将分别验证转链、物料和订单。',
+                '点击「测试接口权限」，分别查看商品详情、万能转链、淘口令是否已开通。',
+                '订单同步需额外申请订单查询权限，开通后再接入。',
               ] : [
                 '在企业微信创建自建应用并设置可见范围。',
                 '填写 CorpID、AgentID 和应用 Secret。',
