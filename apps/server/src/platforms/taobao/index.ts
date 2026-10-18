@@ -75,17 +75,50 @@ const idFromUrl = (url: string) => {
     return null
   }
 }
-// 解析商品 ID：直接读取 id 参数；m.tb.cn 等短链请求一次页面，从跳转地址或页面脚本中提取
+// 在任意文本（含多层 URL 编码的跳转参数，如 redirectURL=...%3Fid%3D123）中找商品 ID
+export function idFromText(text: string): string | null {
+  let t = text
+  for (let i = 0; i < 3; i++) {
+    const hit =
+      /(?:[?&]|\b)(?:id|itemId|item_id)=(\d{6,})/.exec(t)?.[1] ||
+      /\/i(\d{6,})\.htm/.exec(t)?.[1] ||
+      /"(?:itemId|item_id|itemid)"\s*:\s*"?(\d{6,})/.exec(t)?.[1]
+    if (hit) return hit
+    try {
+      const next = decodeURIComponent(t)
+      if (next === t) break
+      t = next
+    } catch {
+      break
+    }
+  }
+  return null
+}
+// 分享文案里「」中的商品标题（如：【淘宝】https://e.tb.cn/h.xxx CZ321 「商品标题」）
+export function shareTitle(content?: string) {
+  const t = /「([^「」]{4,120})」/.exec(content || '')?.[1]?.trim()
+  return t || null
+}
+// 解析商品 ID：直接读取 id 参数；m.tb.cn / e.tb.cn 等短链逐跳请求（最多 3 跳），从跳转地址或页面脚本中提取
 export async function resolveItemId(url: string) {
   const direct = idFromUrl(url)
   if (direct) return direct
-  const host = new URL(url).hostname
-  if (!host.endsWith('tb.cn')) return null
-  const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' } })
-  const location = res.headers.get('location')
-  if (location) return idFromUrl(new URL(location, url).toString())
-  const html = await res.text()
-  return /[?&](?:id|itemId)=(\d{6,})/.exec(html)?.[1] || /"itemId"\s*:\s*"?(\d{6,})/.exec(html)?.[1] || null
+  if (!new URL(url).hostname.endsWith('tb.cn')) return null
+  let current = url
+  for (let hop = 0; hop < 3; hop++) {
+    const res = await fetch(current, { redirect: 'manual', signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' } })
+    const location = res.headers.get('location')
+    if (location) {
+      const next = new URL(location, current).toString()
+      const id = idFromUrl(next) || idFromText(next)
+      if (id) return id
+      if (!new URL(next).hostname.endsWith('tb.cn')) return null // 跳到登录 / 风控页等，无法继续
+      current = next
+      continue
+    }
+    return idFromText(await res.text())
+  }
+  return null
 }
 
 export function parseItemDetail(resp: any) {
@@ -109,8 +142,10 @@ export function parseMaterialSearch(resp: any, itemId: string | null, title: str
   const rows = list(resp?.result_list, 'map_data')
   const norm = (t: unknown) => String(t || '').replace(/\s+/g, '')
   const hit =
-    (itemId && rows.find((r) => String(r.item_id) === itemId)) ||
+    (itemId && rows.find((r) => String(r.item_id) === itemId || String(r.item_id).endsWith('-' + itemId))) ||
     rows.find((r) => norm(r.item_basic_info?.title) === norm(title)) ||
+    // 分享文案中的标题可能被截断或略有出入：最后按标题包含关系匹配
+    (rows.find((r) => { const t = norm(r.item_basic_info?.title); const q = norm(title); return q.length >= 8 && (t.includes(q) || q.includes(t)) })) ||
     null
   if (!hit) return null
   const pub = hit.publish_info || {}, price = hit.price_promotion_info || {}
@@ -152,37 +187,44 @@ export const taobaoPlugin: PlatformPlugin = {
   orderStatus: (code) => tkStatus[code] || 'UNATTRIBUTED',
   orderAmounts: () => ({ amount: null, commission: null, commissionBase: null }),
   orderImage: () => null,
-  async convert(c, url) {
+  async convert(c, url, _trackingCode, content) {
     if (!c.adzoneId) throw new BadRequestException('尚未保存推广位 PID，请到渠道配置填写')
+    const sharedTitle = shareTitle(content)
     const itemId = await resolveItemId(url).catch(() => null)
-    if (!itemId) throw new BadRequestException('无法从链接识别淘宝商品，请发送商品详情链接或带 m.tb.cn 链接的分享文案')
+    if (!itemId && !sharedTitle) throw new BadRequestException('无法从链接识别淘宝商品，请发送商品详情链接或完整的淘宝分享文案')
     const notices: string[] = []
     let info: ReturnType<typeof parseItemDetail> = null
-    try {
-      info = parseItemDetail(await topRequest(c, 'taobao.tbk.item.info.upgrade.get', { item_id: itemId }))
-      if (!info) notices.push('商品详情接口未返回该商品（可能不在淘宝客推广范围）')
-    } catch (e) {
-      notices.push(`商品信息：${(e as Error).message}`)
-    }
+    if (itemId) {
+      try {
+        info = parseItemDetail(await topRequest(c, 'taobao.tbk.item.info.upgrade.get', { item_id: itemId }))
+        if (!info) notices.push('商品详情接口未返回该商品')
+      } catch (e) {
+        notices.push(`商品详情：${(e as Error).message}`)
+      }
+    } else notices.push('短链未解析出商品 ID，按分享标题搜索')
+    // 详情接口拿不到时，用分享文案中的标题兜底（用于展示与物料搜索）
+    if (!info && sharedTitle) info = { itemId, title: sharedTitle, image: null, price: null, finalPrice: null, coupon: null, commission: null }
+    const why = () => (notices.length ? `（${notices.join('；')}）` : '')
     let converted: ReturnType<typeof parseConvert> = null
     const label = info?.title ? `「${info.title}」` : ''
     try {
+      if (!itemId) throw new TopError('11', '', '无商品 ID，跳过万能转链')
       converted = parseConvert(await topRequest(c, 'taobao.tbk.dg.general.link.convert', { adzone_id: c.adzoneId, item_dto: [{ item_id: itemId }] }))
     } catch (e) {
       if (!(e instanceof TopError && e.code === '11')) throw new BadRequestException(`商品${label}转链失败：${(e as Error).message}`)
       // 万能转链为邀约权限；无权限时用「物料搜索」按标题搜索并按商品 ID 匹配，结果中的推广链接已带推广位
-      if (!info?.title) throw new BadRequestException('未开通万能转链，且无法获取商品标题用于物料搜索转链')
+      if (!info?.title) throw new BadRequestException(`未开通万能转链，且无法获取商品标题用于物料搜索转链${why()}`)
       let found: ReturnType<typeof parseMaterialSearch> = null
       try {
         found = parseMaterialSearch(
           await topRequest(c, 'taobao.tbk.dg.material.optional.upgrade', { adzone_id: c.adzoneId, q: info.title.slice(0, 60), page_size: 20 }),
-          info.itemId,
+          info.itemId || itemId,
           info.title,
         )
       } catch (err) {
         throw new BadRequestException(`商品${label}转链失败（物料搜索）：${(err as Error).message}`)
       }
-      if (!found?.url) throw new BadRequestException(`商品${label}暂无法转链：物料搜索未找到该商品（可能不在淘宝客推广范围）`)
+      if (!found?.url) throw new BadRequestException(`商品${label}暂无法转链：物料搜索未找到该商品${why()}`)
       converted = { error: null, url: found.url, password: null, coupon: found.coupon, commission: found.commission }
       if (found.finalPrice != null && info.finalPrice == null) info.finalPrice = found.finalPrice
       notices.push('已通过物料搜索转链')

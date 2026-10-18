@@ -108,7 +108,7 @@ export async function convert(content: string, actor: string, trace: string, use
     },
   })
   try {
-    const { link, snapshot } = await plugin.convert(c, url, trackingCode || undefined)
+    const { link, snapshot } = await plugin.convert(c, url, trackingCode || undefined, content)
     const rule = userId ? await db.rebateRule.findFirst({ where: { scopeKey: 'user:' + userId } }) : null
     const basisPoints = rule?.basisPoints ?? Math.round((await settings()).ratio * 100)
     snapshot.rebate =

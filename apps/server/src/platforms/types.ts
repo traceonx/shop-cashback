@@ -34,6 +34,8 @@ export interface PlatformPlugin {
     config: PlatformConfig,
     url: string,
     trackingCode?: string,
+    /** 用户发送的原始内容（分享文案），可从中取商品标题等辅助信息 */
+    content?: string,
   ): Promise<{
     link: string
     snapshot: {

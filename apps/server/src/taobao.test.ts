@@ -105,3 +105,38 @@ test('物料搜索找不到商品时给出明确原因', async () => {
     globalThis.fetch = original
   }
 })
+
+test('短链跳转参数与分享文案：多层编码中找商品 ID、提取「」标题', async () => {
+  const { idFromText, shareTitle } = await import('./platforms/taobao')
+  assert.equal(idFromText('https://login.taobao.com/login.htm?redirectURL=https%3A%2F%2Fitem.taobao.com%2Fitem.htm%3Fspm%3Da%26id%3D778899001122'), '778899001122')
+  assert.equal(idFromText("var url = 'https://a.m.taobao.com/i665544332211.htm?price=1'"), '665544332211')
+  assert.equal(idFromText('https://login.taobao.com/x?redirectURL=https%3a%2f%2fitem.taobao.com%2fwow%2fz%2fhome%3Frand%3Dabc'), null)
+  assert.equal(shareTitle('【淘宝】https://e.tb.cn/h.abc?tk=x CZ321 「Mistine蜜丝婷小果泥唇霜」\n点击链接直接打开'), 'Mistine蜜丝婷小果泥唇霜')
+  assert.equal(shareTitle('https://item.taobao.com/item.htm?id=1'), null)
+})
+
+test('详情接口失败时用分享文案标题走物料搜索', async () => {
+  const original = globalThis.fetch
+  const methods: string[] = []
+  try {
+    globalThis.fetch = async (_url, options) => {
+      const p = options!.body as URLSearchParams
+      const method = p.get('method')!
+      methods.push(method)
+      if (method === 'taobao.tbk.item.info.upgrade.get') return new Response(JSON.stringify({ error_response: { code: 15, msg: 'Remote service error', sub_msg: '商品不存在' } }))
+      if (method === 'taobao.tbk.dg.general.link.convert') return new Response(JSON.stringify({ error_response: { code: 11, sub_code: 'isv.permission-api-package-limit' } }))
+      if (method === 'taobao.tbk.dg.material.optional.upgrade') {
+        assert.equal(p.get('q'), 'Mistine蜜丝婷小果泥唇霜果汁唇釉')
+        return new Response(JSON.stringify({ tbk_dg_material_optional_upgrade_response: { result_list: { map_data: [
+          { item_id: 'Zz-9', item_basic_info: { title: 'Mistine蜜丝婷小果泥唇霜果汁唇釉唇泥雾面口红学生' }, publish_info: { click_url: '//s.click.taobao.com/ok' } },
+        ] } } }))
+      }
+      return new Response(JSON.stringify({ tbk_tpwd_create_response: { data: { password_simple: '￥X￥' } } }))
+    }
+    const r = await taobaoPlugin.convert({ appKey: 'k', appSecret: 's', pid: 'mm_1_2_3', adzoneId: '3' }, 'https://item.taobao.com/item.htm?id=778899', undefined, '【淘宝】https://e.tb.cn/h.x CZ321 「Mistine蜜丝婷小果泥唇霜果汁唇釉」')
+    assert.equal(r.link, 'https://s.click.taobao.com/ok')
+    assert.equal(r.snapshot.product, 'Mistine蜜丝婷小果泥唇霜果汁唇釉')
+  } finally {
+    globalThis.fetch = original
+  }
+})
