@@ -4,7 +4,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { Banknote, BarChart3, Bot, ChevronRight, Clock3, Coins, ShoppingBag, ShoppingCart, Users } from 'lucide-react'
 import { api, type Row } from '../lib/api'
 import { amount, errorText, money } from '../lib/format'
-import { Alert, Avatar, Button, Card, CardBody, CardHeader, Chip, EmptyState, Segmented, StatCard, StatusChip } from '../ui'
+import { PlatformLogo, PlatformTag, Alert, Avatar, Button, Card, CardBody, CardHeader, Chip, EmptyState, Segmented, StatCard, StatusChip } from '../ui'
 import { ProductCell } from './shared'
 
 type Service = { kind: string; configured: boolean; test: null | { status: string } }
@@ -52,7 +52,7 @@ export function Dashboard() {
       <div className="stat-grid">
         <StatCard icon={ShoppingCart} tone="primary" label="今日订单" value={overview?.newOrders ?? '—'} unit="单" />
         <StatCard icon={Users} tone="info" label="活跃用户" value={overview?.active ?? '—'} unit="人" />
-        <StatCard icon={Coins} tone="success" label="预估佣金" value={overview ? money(overview.commission) : '—'} caption="以联盟结算为准" />
+        <StatCard icon={Coins} tone="success" label="预估佣金" value={overview ? money(overview.commission) : '—'} />
         <StatCard icon={Clock3} tone="warning" label="待审核提现" value={overview?.pending ?? '—'} unit="笔" />
       </div>
 
@@ -92,7 +92,7 @@ export function Dashboard() {
               const ok = s?.test?.status === 'CONNECTED'
               return (
                 <button key={kind} type="button" className="service-item" onClick={() => navigate(serviceInfo[kind].path)}>
-                  <Avatar icon={kind === 'wecom' ? Bot : ShoppingBag} tone={ok ? 'success' : 'secondary'} />
+                  <PlatformLogo platform={kind} />
                   <span className="service-text">
                     <strong>{serviceInfo[kind].name}</strong>
                     <small>{serviceInfo[kind].desc}</small>
@@ -141,7 +141,9 @@ export function Dashboard() {
                       <td>
                         <ProductCell row={r} sub={String(r.externalOrderId || '')} />
                       </td>
-                      <td>{String(r.platform || '—')}</td>
+                      <td>
+                        <PlatformTag platform={String(r.platform || '')} />
+                      </td>
                       <td className="text-amount">{amount(r.rebate)}</td>
                       <td>
                         <StatusChip value={String(r.status)} />

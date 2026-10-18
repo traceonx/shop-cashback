@@ -4,12 +4,13 @@ import { Banknote, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, Downloa
 import { api, saveBlob, type Row } from '../lib/api'
 import { amount, errorText, money, type Notify } from '../lib/format'
 import { statusLabel } from '../lib/labels'
-import { Alert, Avatar, Button, Card, CardBody, CardHeader, EmptyState, IconButton, Loading, Modal, Pagination, confirm, Select, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
+import { Alert, Avatar, Button, Card, CardBody, CardHeader, EmptyState, IconButton, Loading, Modal, Pagination, PlatformTag, confirm, Select, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
 import { Conversion, ConversionCard } from './Conversion'
 import { ProductCell } from './shared'
 
 export type RecordKind = 'orders' | 'users' | 'rebates' | 'withdrawals' | 'promotions'
-type Column = [key: string, label: string]
+/** 第三项为 true 时只在详情弹窗里显示，列表不展示 */
+type Column = [key: string, label: string, detailOnly?: boolean]
 
 const config: Record<RecordKind, { title: string; columns: Column[] }> = {
   promotions: {
@@ -29,10 +30,9 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
       ['product', '商品'],
       ['platform', '来源'],
       ['user', '返现用户'],
-      ['attribution', '归属'],
       ['paidAmount', '付款金额'],
       ['rebate', '预计返现'],
-      ['ratio', '比例'],
+      ['ratio', '返现比例', true],
       ['status', '状态'],
       ['createdAt', '下单时间'],
       ['completedAt', '完成时间'],
@@ -47,7 +47,7 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
       ['conversions', '转链次数'],
       ['orders', '订单数'],
       ['balance', '可提现余额'],
-      ['ratio', '返现比例'],
+      ['ratio', '返现比例', true],
       ['status', '状态'],
     ],
   },
@@ -83,6 +83,7 @@ const PAGE_SIZE = 10
 function cell(kind: RecordKind, key: string, r: Row) {
   const v = r[key]
   if (key === 'status') return <StatusChip value={String(v)} />
+  if (key === 'platform') return <PlatformTag platform={String(v ?? '')} />
   if (moneyKeys.includes(key)) return key === 'paidAmount' && v == null ? <span className="text-faint">接口未提供</span> : <span className="text-amount">{amount(v)}</span>
   if (key === 'product') return <ProductCell row={r} sub={kind === 'orders' ? String(r.sku || '') : String(r.category || '')} />
   if (key === 'name')
@@ -103,7 +104,8 @@ function cell(kind: RecordKind, key: string, r: Row) {
 type SyncState = { id: string; status: string; count: number; windows: number; total: number; error: string | null } | null
 
 export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) {
-  const { title, columns } = config[kind]
+  const { title, columns: allColumns } = config[kind]
+  const columns = allColumns.filter((c) => !c[2])
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -189,7 +191,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
   }
   function exportCsv() {
     const esc = (s: unknown) => `"${String(s ?? '').replace(/^[=+@-]/, "'$&").replaceAll('"', '""')}"`
-    const csv = '﻿' + [columns.map((c) => c[1]).join(','), ...filtered.map((r) => columns.map(([k]) => esc(r[k])).join(','))].join('\r\n')
+    const csv = '﻿' + [allColumns.map((c) => c[1]).join(','), ...filtered.map((r) => allColumns.map(([k]) => esc(r[k])).join(','))].join('\r\n')
     saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `${title}.csv`)
     notify('已导出当前筛选结果（金额单位：分）')
   }
@@ -221,7 +223,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
           title={title}
           subtitle={
             kind === 'orders'
-              ? '归属未核实的订单不会自动发放返现'
+              ? '未关联用户的订单不会发放返现'
               : kind === 'withdrawals'
                 ? '审核通过后需人工打款，再填写凭证完成'
                 : undefined
@@ -341,7 +343,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
         <RecordDetail
           kind={kind}
           row={selected}
-          columns={columns}
+          columns={allColumns}
           notify={notify}
           onClose={() => setSelected(null)}
           onChanged={() => {

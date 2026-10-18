@@ -29,6 +29,7 @@ function WecomCard() {
   return (
     <>
       <ProviderTile
+        platform="wecom"
         icon={Bot}
         name={it.data?.fields.find((f) => f.key === 'name')?.value || '企业微信'}
         description="接收用户消息、自动回复转链结果"

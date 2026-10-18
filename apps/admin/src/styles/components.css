@@ -968,6 +968,52 @@
   color: var(--c-text-2);
 }
 
+/* 平台标识 */
+.platform-logo {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.platform-logo-sm {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.platform-logo-lg {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-lg);
+  font-size: 22px;
+}
+.platform-jd {
+  background: linear-gradient(135deg, #f0413a, #c8161d);
+}
+.platform-taobao {
+  background: linear-gradient(135deg, #ff8a00, #ff4400);
+}
+.platform-pdd {
+  background: linear-gradient(135deg, #f4475b, #d81e2f);
+}
+.platform-wecom {
+  background: linear-gradient(135deg, #3d9bff, #1677ff);
+}
+.platform-telegram {
+  background: linear-gradient(135deg, #37aee2, #1e96c8);
+}
+.platform-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* 色调（放在最后，覆盖头像 / 标签的默认主色） */
 .tone-success {
   background: rgba(var(--success-rgb), 0.12);

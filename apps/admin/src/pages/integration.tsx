@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { ChevronRight, type LucideIcon } from 'lucide-react'
 import { api } from '../lib/api'
 import { errorText } from '../lib/format'
-import { Avatar, Card, Chip } from '../ui'
+import { Avatar, Card, Chip, PlatformLogo } from '../ui'
 
 export type IntegrationKind = 'wecom' | 'jd' | 'taobao'
 export type IntegrationField = { key: string; label: string; secret: boolean; value: string; configured: boolean }
@@ -89,6 +89,7 @@ export function useIntegration(kind: IntegrationKind) {
 
 /** 渠道卡片：点击打开配置弹窗 */
 export function ProviderTile({
+  platform,
   icon,
   name,
   description,
@@ -97,6 +98,7 @@ export function ProviderTile({
   onClick,
   extra,
 }: {
+  platform?: string
   icon: LucideIcon
   name: string
   description: string
@@ -108,7 +110,7 @@ export function ProviderTile({
   return (
     <Card className="provider-tile">
       <button type="button" onClick={onClick} disabled={loading}>
-        <Avatar icon={icon} tone={status === 'ok' ? 'success' : status === 'pending' ? 'warning' : 'secondary'} size="lg" />
+        {platform ? <PlatformLogo platform={platform} size="lg" /> : <Avatar icon={icon} tone={status === 'ok' ? 'success' : status === 'pending' ? 'warning' : 'secondary'} size="lg" />}
         <span className="provider-text">
           <strong>{name}</strong>
           <small>{description}</small>

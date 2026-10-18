@@ -50,6 +50,7 @@ function AffiliateCard({ kind }: { kind: Affiliate }) {
   return (
     <>
       <ProviderTile
+        platform={kind}
         icon={ShoppingBag}
         name={m.name}
         description={m.description}
