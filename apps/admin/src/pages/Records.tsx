@@ -4,7 +4,7 @@ import { Banknote, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, Downloa
 import { api, saveBlob, type Row } from '../lib/api'
 import { amount, errorText, money, type Notify } from '../lib/format'
 import { statusLabel } from '../lib/labels'
-import { Alert, Avatar, Button, Card, CardBody, CardHeader, EmptyState, IconButton, Loading, Modal, Pagination, Select, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
+import { Alert, Avatar, Button, Card, CardBody, CardHeader, EmptyState, IconButton, Loading, Modal, Pagination, confirm, Select, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
 import { Conversion, ConversionCard } from './Conversion'
 import { ProductCell } from './shared'
 
@@ -399,7 +399,11 @@ function RecordDetail({
   if (kind === 'users')
     footer = (
       <>
-        <Button variant="danger" disabled={busy} onClick={() => patchUser({ status: row.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE' })}>
+        <Button variant="danger" disabled={busy} onClick={async () => {
+            const disabling = row.status === 'ACTIVE'
+            if (!disabling || (await confirm({ title: '禁用账户', content: '禁用后该用户发送的链接将不再转链，可随时重新启用。', okText: '禁用', danger: true })))
+              patchUser({ status: disabling ? 'DISABLED' : 'ACTIVE' })
+          }}>
           {row.status === 'ACTIVE' ? '禁用账户' : '启用账户'}
         </Button>
         <Button variant="primary" icon={Check} loading={busy} onClick={() => patchUser({ ratio })}>
@@ -411,7 +415,9 @@ function RecordDetail({
     footer =
       row.status === 'PENDING_REVIEW' ? (
         <>
-          <Button variant="danger" disabled={busy} onClick={() => withdraw('reject')}>
+          <Button variant="danger" disabled={busy} onClick={async () => {
+              if (await confirm({ title: '拒绝提现', content: '拒绝后该申请将关闭，请确认已填写拒绝原因。', okText: '拒绝', danger: true })) withdraw('reject')
+            }}>
             拒绝
           </Button>
           <Button variant="primary" icon={Check} loading={busy} onClick={() => withdraw('approve')}>

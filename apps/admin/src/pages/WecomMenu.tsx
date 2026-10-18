@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus, Save, Send, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { dateTime, errorText } from '../lib/format'
-import { Alert, Button, Card, CardBody, CardHeader, IconButton, Loading, Select, TextField } from '../ui'
+import { Alert, Button, Card, CardBody, CardHeader, IconButton, Loading, Select, TextField, confirm } from '../ui'
 
 type Draft = { name: string; children: { name: string; action: string }[] }[]
 type Data = { draft: Draft; published: null | { draft: Draft; publishedAt: string }; actions: Record<string, { label: string; command: string }> }
@@ -60,7 +60,9 @@ export function WecomMenu() {
             <Button variant="outlined" icon={Save} disabled={busy || !dirty} onClick={() => submit(false)}>
               保存草稿
             </Button>
-            <Button variant="primary" icon={Send} loading={busy} disabled={dirty} onClick={() => submit(true)}>
+            <Button variant="primary" icon={Send} loading={busy} disabled={dirty} onClick={async () => {
+              if (await confirm({ title: '发布菜单', content: '发布会覆盖企业微信应用当前的菜单。', okText: '发布' })) void submit(true)
+            }}>
               发布
             </Button>
           </>

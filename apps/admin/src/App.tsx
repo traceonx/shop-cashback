@@ -4,7 +4,7 @@ import { CheckCircle2, X } from 'lucide-react'
 import { auth } from './lib/api'
 import type { Notify } from './lib/format'
 import { AppLayout } from './layout/AppLayout'
-import { IconButton } from './ui'
+import { ConfirmHost, IconButton } from './ui'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { Records } from './pages/Records'
@@ -52,6 +52,7 @@ export function App() {
   return (
     <>
       {content}
+      <ConfirmHost />
       {toast && (
         <div className="toast" role="status">
           <CheckCircle2 size={18} />

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowRight, Box, Download, Github, RefreshCw } from 'lucide-react'
 import { api } from '../lib/api'
 import { dateTime, elapsed, errorText, mb } from '../lib/format'
-import { Alert, Button, Card, CardBody, CardHeader, Chip, ConfirmDialog, IconButton, Loading } from '../ui'
+import { Alert, Button, Card, CardBody, CardHeader, Chip, IconButton, Loading, confirm } from '../ui'
 
 const CHANGELOG_URL = 'https://github.com/traceonx/shop-cashback/blob/main/CHANGELOG.md'
 
@@ -35,7 +35,6 @@ export function SystemUpdate() {
   const [restarting, setRestarting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [checking, setChecking] = useState(false)
-  const [confirming, setConfirming] = useState(false)
   const before = useRef<string | undefined>(undefined)
 
   const load = useCallback(async () => {
@@ -70,7 +69,12 @@ export function SystemUpdate() {
   }
   async function start() {
     if (!status) return
-    setConfirming(false)
+    const ok = await confirm({
+      title: '确认更新',
+      okText: '开始更新',
+      content: `当前 v${status.current.version}${status.latest ? `，将更新到 v${status.latest}` : ''}。更新期间服务会重启约 1 分钟，数据保留在 data 目录。`,
+    })
+    if (!ok) return
     setBusy(true)
     setError('')
     try {
@@ -167,18 +171,12 @@ export function SystemUpdate() {
           )}
           {state.log && !running && <pre className="update-log">{state.log}</pre>}
           <div className="row row-end">
-            <Button variant={running ? 'tonal' : 'primary'} icon={Download} loading={running || busy} disabled={!docker.available} onClick={() => setConfirming(true)}>
+            <Button variant={running ? 'tonal' : 'primary'} icon={Download} loading={running || busy} disabled={!docker.available} onClick={start}>
               {running ? '更新中…' : status.hasUpdate ? (latest ? `更新到 v${latest}` : '立即更新') : '检查并更新'}
             </Button>
           </div>
         </div>
       </CardBody>
-      {confirming && (
-        <ConfirmDialog title="确认更新" confirmText="开始更新" onConfirm={start} onCancel={() => setConfirming(false)}>
-          当前 v{current.version}
-          {latest ? `，将更新到 v${latest}` : ''}。更新期间服务会重启约 1 分钟，数据保留在 data 目录。
-        </ConfirmDialog>
-      )}
     </Card>
   )
 }
