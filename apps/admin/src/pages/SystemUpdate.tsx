@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowRight, Box, Download, Github } from 'lucide-react'
+import { ArrowRight, Box, Download, Github, RefreshCw } from 'lucide-react'
 import { api } from '../lib/api'
 import { dateTime, elapsed, errorText, mb } from '../lib/format'
-import { Alert, Button, Card, CardBody, CardHeader, Chip, Loading } from '../ui'
+import { Alert, Button, Card, CardBody, CardHeader, Chip, ConfirmDialog, IconButton, Loading } from '../ui'
 
 const CHANGELOG_URL = 'https://github.com/traceonx/shop-cashback/blob/main/CHANGELOG.md'
 
@@ -34,6 +34,8 @@ export function SystemUpdate() {
   const [error, setError] = useState('')
   const [restarting, setRestarting] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const before = useRef<string | undefined>(undefined)
 
   const load = useCallback(async () => {
@@ -60,8 +62,15 @@ export function SystemUpdate() {
     return () => clearInterval(timer)
   }, [status?.state.running, restarting, load])
 
+  // 手动重新检查 Docker Hub 上的最新版本
+  async function check() {
+    setChecking(true)
+    await load()
+    setChecking(false)
+  }
   async function start() {
-    if (!status || !confirm(`确认更新？更新期间服务会重启约 1 分钟。\n当前 v${status.current.version}${status.latest ? `，最新 v${status.latest}` : ''}`)) return
+    if (!status) return
+    setConfirming(false)
     setBusy(true)
     setError('')
     try {
@@ -107,6 +116,7 @@ export function SystemUpdate() {
             <span>最新版本</span>
             <p>
               {latest && <b>v{latest}</b>}
+              <IconButton icon={RefreshCw} label="检查最新版本" size="sm" spinning={checking} disabled={checking || running} onClick={check} />
               {status.hasUpdate ? (
                 <Chip>{latest ? '有新版本' : '有新镜像'}</Chip>
               ) : status.imageChanged === false || latest ? (
@@ -157,12 +167,18 @@ export function SystemUpdate() {
           )}
           {state.log && !running && <pre className="update-log">{state.log}</pre>}
           <div className="row row-end">
-            <Button variant={running ? 'tonal' : 'primary'} icon={Download} loading={running || busy} disabled={!docker.available} onClick={start}>
+            <Button variant={running ? 'tonal' : 'primary'} icon={Download} loading={running || busy} disabled={!docker.available} onClick={() => setConfirming(true)}>
               {running ? '更新中…' : status.hasUpdate ? (latest ? `更新到 v${latest}` : '立即更新') : '检查并更新'}
             </Button>
           </div>
         </div>
       </CardBody>
+      {confirming && (
+        <ConfirmDialog title="确认更新" confirmText="开始更新" onConfirm={start} onCancel={() => setConfirming(false)}>
+          当前 v{current.version}
+          {latest ? `，将更新到 v${latest}` : ''}。更新期间服务会重启约 1 分钟，数据保留在 data 目录。
+        </ConfirmDialog>
+      )}
     </Card>
   )
 }

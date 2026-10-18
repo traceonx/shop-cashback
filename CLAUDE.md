@@ -9,6 +9,6 @@
 
 - 目录：`ui/` 通用组件，`layout/` 布局，`pages/` 页面，`lib/` 工具（api、format、labels、theme），`styles/` 样式（tokens → base → components → layout → pages）。
 - 风格参照 MoviePilot，整体保持精简：颜色、圆角、阴影只用 `styles/tokens.css` 里的变量，不写死颜色；页面不写内联样式。
-- 弹窗一律用 `ui/Modal`（头部、底部固定，内容滚动，`dismissible` 控制保存中禁止关闭），表单输入用 `TextField / SelectField / TextArea`，按钮用 `Button`（primary / tonal / outlined / text / danger）。
+- 弹窗一律用 `ui/Modal`（头部、底部固定，内容滚动，`dismissible` 控制保存中禁止关闭），表单输入用 `TextField / TextArea / Select / DatePicker`，确认操作用 `ConfirmDialog`（不用原生 select、date、confirm），按钮用 `Button`（primary / tonal / outlined / text / danger）。
 - 新页面先复用 Card + CardHeader（标题、副标题、右侧操作）+ CardBody，页面特有样式才写进 `styles/pages.css`。
 

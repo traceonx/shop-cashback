@@ -110,37 +110,16 @@
   display: none;
 }
 
-/* ---------- 顶栏 ---------- */
+/* ---------- 顶栏：只放操作按钮，不显示页面标题，随页面滚动 ---------- */
 .navbar {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-navbar);
   display: flex;
   align-items: center;
   gap: 8px;
   height: var(--navbar-height);
   padding: 0 var(--page-gutter);
-  background: rgba(var(--on-surface-rgb), 0);
-  transition: background 0.2s, box-shadow 0.2s;
-}
-.navbar.scrolled {
-  background: color-mix(in srgb, var(--c-bg) 82%, transparent);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 1px 0 var(--c-border);
 }
 .navbar-menu {
   display: none;
-}
-.navbar-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--c-text);
-  font-size: 16px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .navbar-actions {
   display: flex;

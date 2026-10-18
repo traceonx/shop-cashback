@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus, Save, Send, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { dateTime, errorText } from '../lib/format'
-import { Alert, Button, Card, CardBody, CardHeader, IconButton, Loading, SelectField, TextField } from '../ui'
+import { Alert, Button, Card, CardBody, CardHeader, IconButton, Loading, Select, TextField } from '../ui'
 
 type Draft = { name: string; children: { name: string; action: string }[] }[]
 type Data = { draft: Draft; published: null | { draft: Draft; publishedAt: string }; actions: Record<string, { label: string; command: string }> }
@@ -83,7 +83,7 @@ export function WecomMenu() {
                   {group.children.map((child, j) => (
                     <div className="menu-child" key={j}>
                       <TextField dense aria-label="子菜单名称" value={child.name} onChange={(e) => change((d) => void (d[i].children[j].name = e.target.value))} />
-                      <SelectField dense aria-label="功能" value={child.action} options={actions} onChange={(e) => change((d) => void (d[i].children[j].action = e.target.value))} />
+                      <Select dense aria-label="功能" value={child.action} options={actions} onChange={(v) => change((d) => void (d[i].children[j].action = v))} />
                       <IconButton icon={X} label="移除子菜单" size="sm" disabled={group.children.length <= 1} onClick={() => change((d) => void d[i].children.splice(j, 1))} />
                     </div>
                   ))}

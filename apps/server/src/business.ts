@@ -9,24 +9,37 @@ export async function settings() {
   const row = await db.systemConfig.findUnique({ where: { key: 'rules' } })
   return (row?.value as { ratio: number; minimum: number } | undefined) || { ratio: 70, minimum: 10 }
 }
+/** 订单当前状态：待核实归属的订单按平台原始状态换算 */
+function orderStatus(o: { platform: string; status: string; rawStatus: string | null }) {
+  if (o.status !== 'UNATTRIBUTED') return o.status
+  try {
+    return platform(o.platform).orderStatus(o.rawStatus || '')
+  } catch {
+    return o.status
+  }
+}
 export async function overview() {
   const start = new Date(new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) + 'T00:00:00+08:00')
-  const [conversions, success, active, pending, newOrders, sums, wallets] = await Promise.all([
+  const [conversions, success, active, pending, todayOrders, wallets] = await Promise.all([
     db.promotionRecord.count({ where: { createdAt: { gte: start } } }),
     db.promotionRecord.count({ where: { createdAt: { gte: start }, status: 'SUCCESS' } }),
     db.promotionRecord.groupBy({ by: ['userId'], where: { createdAt: { gte: start }, userId: { not: null } } }),
     db.withdrawalRequest.count({ where: { status: 'PENDING_REVIEW' } }),
-    db.affiliateOrder.count({ where: { placedAt: { gte: start } } }),
-    db.affiliateOrder.aggregate({ _sum: { commissionCents: true }, where: { placedAt: { gte: start } } }),
+    db.affiliateOrder.findMany({
+      where: { placedAt: { gte: start } },
+      select: { platform: true, status: true, rawStatus: true, commissionCents: true },
+    }),
     db.walletAccount.aggregate({ _sum: { pendingCents: true, withdrawnCents: true } }),
   ])
+  // 已取消的订单不计入今日订单与预估佣金
+  const valid = todayOrders.filter((o) => orderStatus(o) !== 'CANCELLED')
   return {
     conversions,
     successRate: conversions ? Math.round((success / conversions) * 1000) / 10 : 0,
     active: active.length,
     pending,
-    newOrders,
-    commission: centsNumber(sums._sum.commissionCents) || 0,
+    newOrders: valid.length,
+    commission: valid.reduce((sum, o) => sum + (centsNumber(o.commissionCents) || 0), 0),
     settlement: centsNumber(wallets._sum.pendingCents) || 0,
     withdrawn: centsNumber(wallets._sum.withdrawnCents) || 0,
   }
@@ -34,7 +47,9 @@ export async function overview() {
 export async function trends(days: number) {
   const end = new Date(new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) + 'T00:00:00+08:00')
   const start = new Date(end.getTime() - (days - 1) * 86400000)
-  const records = await db.affiliateOrder.findMany({ where: { placedAt: { gte: start } }, select: { placedAt: true } })
+  const records = (
+    await db.affiliateOrder.findMany({ where: { placedAt: { gte: start } }, select: { placedAt: true, platform: true, status: true, rawStatus: true } })
+  ).filter((o) => orderStatus(o) !== 'CANCELLED')
   const counts = new Map<string, number>()
   for (const r of records) {
     const key = dateText(r.placedAt).slice(0, 10)

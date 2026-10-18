@@ -46,7 +46,6 @@ export const navigation: { title?: string; items: NavItem[] }[] = [
     ],
   },
 ]
-const titleOf = (path: string) => navigation.flatMap((g) => g.items).find((i) => i.path === path)?.label || '拾惠'
 
 const themeIcon = { system: Monitor, light: Sun, dark: Moon }
 const themeLabel = { system: '跟随系统', light: '浅色', dark: '深色' }
@@ -57,17 +56,11 @@ export function AppLayout({ onLogout, children }: { onLogout: () => void; childr
   const navigate = useNavigate()
   const { mode, next } = useTheme()
   const [drawer, setDrawer] = useState(false)
-  const [scrolled, setScrolled] = useState(false)
   const [logs, setLogs] = useState(false)
   const [menu, setMenu] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => setDrawer(false), [location.pathname])
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 4)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
   useEffect(() => {
     if (!menu) return
     const close = (e: MouseEvent) => !menuRef.current?.contains(e.target as Node) && setMenu(false)
@@ -103,9 +96,9 @@ export function AppLayout({ onLogout, children }: { onLogout: () => void; childr
         </div>
       </aside>
 
-      <header className={cx('navbar', scrolled && 'scrolled')}>
+      <header className="navbar">
         <IconButton className="navbar-menu" icon={Menu} label="打开菜单" onClick={() => setDrawer(true)} />
-        <div className="navbar-title">{titleOf(location.pathname)}</div>
+        <span className="spacer" />
         <div className="navbar-actions">
           <IconButton icon={FileText} label="实时日志" onClick={() => setLogs(true)} />
           <IconButton icon={themeIcon[mode]} label={`主题：${themeLabel[mode]}（点击切换）`} onClick={next} />

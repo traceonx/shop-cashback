@@ -4,7 +4,7 @@ import { Banknote, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, Downloa
 import { api, saveBlob, type Row } from '../lib/api'
 import { amount, errorText, money, type Notify } from '../lib/format'
 import { statusLabel } from '../lib/labels'
-import { Alert, Avatar, Button, Card, CardBody, CardHeader, EmptyState, IconButton, Loading, Modal, Pagination, SelectField, StatCard, StatusChip, TextArea, TextField } from '../ui'
+import { Alert, Avatar, Button, Card, CardBody, CardHeader, EmptyState, IconButton, Loading, Modal, Pagination, Select, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
 import { Conversion, ConversionCard } from './Conversion'
 import { ProductCell } from './shared'
 
@@ -228,11 +228,11 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
             <>
               {kind === 'orders' && (
                 <>
-                  <SelectField
+                  <Select
                     dense
                     aria-label="同步范围"
                     value={syncHours}
-                    onChange={(e) => setSyncHours(e.target.value)}
+                    onChange={setSyncHours}
                     options={[
                       ['1', '最近 1 小时'],
                       ['24', '最近 1 天'],
@@ -260,9 +260,9 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
         <div className="toolbar">
           <TextField dense icon={Search} placeholder="搜索商品、用户或编号" aria-label="搜索" value={query} onChange={(e) => setQuery(e.target.value)} className="toolbar-search" />
           {kind !== 'rebates' && (
-            <SelectField dense aria-label="状态" value={status} onChange={(e) => setStatus(e.target.value)} options={[['', '全部状态'], ...statuses.map((s): [string, string] => [s, statusLabel(s)])]} />
+            <Select dense aria-label="状态" value={status} onChange={setStatus} options={[['', '全部状态'], ...statuses.map((s): [string, string] => [s, statusLabel(s)])]} />
           )}
-          <TextField dense type="date" aria-label="日期" value={date} onChange={(e) => setDate(e.target.value)} />
+          <DatePicker dense aria-label="日期" value={date} onChange={setDate} />
           <IconButton icon={RotateCcw} label="重置筛选" onClick={reset} />
           <IconButton icon={RefreshCw} label="刷新" spinning={loading} onClick={load} />
         </div>
@@ -285,21 +285,23 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
                       {columns.map(([key, label]) => (
                         <th key={key}>{label}</th>
                       ))}
-                      <th aria-label="操作" />
+                      {kind === 'withdrawals' && <th aria-label="操作" />}
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE).map((r) => (
-                      <tr key={r.id}>
+                      <tr key={r.id} className="is-clickable" onClick={() => setSelected(r)}>
                         {columns.map(([key]) => (
                           <td key={key}>{cell(kind, key, r)}</td>
                         ))}
-                        <td className="nowrap">
-                          <Button variant="text" size="sm" onClick={() => setSelected(r)}>
-                            {kind === 'withdrawals' && r.status === 'PENDING_REVIEW' ? '审核' : '详情'}
-                            <ChevronRight size={14} />
-                          </Button>
-                        </td>
+                        {kind === 'withdrawals' && (
+                          <td className="nowrap">
+                            <Button variant="text" size="sm">
+                              {r.status === 'PENDING_REVIEW' ? '审核' : '查看'}
+                              <ChevronRight size={14} />
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
