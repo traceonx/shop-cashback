@@ -140,7 +140,7 @@ try {
   const tbDetails = (await (await request('/integrations/taobao/details', 'POST', {}, token)).json()).data
   assert.equal(tbDetails.fields.find((f) => f.key === 'appSecret').value, testSecret)
   assert.equal(tbDetails.fields.find((f) => f.key === 'adzoneId').value, '678')
-  assert.equal((await request('/integrations/taobao/test', 'POST', {}, token)).status, 400)
+  // 淘宝联盟连接测试会请求真实 TOP 网关，集成测试不调用第三方服务；请求与解析由 taobao.test.ts 以模拟响应覆盖
   assert.ok(!(await db.affiliateConfig.findUnique({ where: { accountId: 'taobao-primary' } })).encryptedConfig.includes(testSecret))
   const cfg = await db.affiliateConfig.findUnique({ where: { accountId: 'jd-primary' } })
   assert.ok(!cfg.encryptedConfig.includes(testSecret))
