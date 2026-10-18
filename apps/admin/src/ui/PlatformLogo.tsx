@@ -36,3 +36,14 @@ export function PlatformTag({ platform }: { platform: string }) {
     </span>
   )
 }
+
+/** 缩略图左上角的平台角标 */
+export function PlatformRibbon({ platform }: { platform: string }) {
+  const key = platformKey(platform)
+  if (!key) return null
+  return (
+    <span className="platform-ribbon" title={meta[key].name}>
+      <span className={`platform-${key}`}>{meta[key].name}</span>
+    </span>
+  )
+}

@@ -27,7 +27,6 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
     title: '订单列表',
     columns: [
       ['product', '商品'],
-      ['platform', '来源'],
       ['user', '返现用户'],
       ['paidAmount', '付款金额'],
       ['rebate', '预计返现'],
@@ -35,7 +34,7 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
       ['status', '状态'],
       ['createdAt', '下单时间'],
       ['completedAt', '完成时间'],
-      ['externalOrderId', '订单号'],
+      ['externalOrderId', '订单号', true],
     ],
   },
   users: {
@@ -84,7 +83,8 @@ function cell(kind: RecordKind, key: string, r: Row) {
   if (key === 'status') return <StatusChip value={String(v)} />
   if (key === 'platform') return <PlatformTag platform={String(v ?? '')} />
   if (moneyKeys.includes(key)) return key === 'paidAmount' && v == null ? <span className="text-faint">接口未提供</span> : <span className="text-amount">{amount(v)}</span>
-  if (key === 'product') return <ProductCell row={r} sub={kind === 'orders' ? String(r.sku || '') : String(r.category || '')} />
+  if (key === 'product')
+    return kind === 'orders' ? <ProductCell row={r} platform={String(r.platform ?? '')} /> : <ProductCell row={r} sub={String(r.category || '')} />
   if (key === 'name')
     return (
       <div className="cell-media">
@@ -219,7 +219,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
 
   const sum = (s: string) => money(rows.filter((r) => r.status === s).reduce((a, r) => a + Number(r.amount), 0))
   return (
-    <>
+    <div className="list-page">
       {kind === 'withdrawals' && (
         <div className="stat-grid stat-grid-3">
           <StatCard icon={Clock3} tone="warning" label="待审核金额" value={sum('PENDING_REVIEW')} />
@@ -234,7 +234,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
         </Alert>
       )}
 
-      <Card>
+      <Card className="list-card">
         <div className="toolbar">
           <TextField dense icon={Search} placeholder="搜索商品、用户或编号" aria-label="搜索" value={query} onChange={(e) => setQuery(e.target.value)} className="toolbar-search" />
           {kind !== 'rebates' && (
@@ -329,7 +329,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
           }}
         />
       )}
-    </>
+    </div>
   )
 }
 

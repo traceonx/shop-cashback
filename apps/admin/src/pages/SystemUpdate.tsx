@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowRight, Box, Download, Github, RefreshCw } from 'lucide-react'
+import { ArrowRight, Box, Clock3, Download, Github, RefreshCw, Save } from 'lucide-react'
 import { api } from '../lib/api'
 import { dateTime, elapsed, errorText, mb } from '../lib/format'
-import { Alert, Button, Card, CardBody, CardHeader, Chip, IconButton, Loading, confirm } from '../ui'
+import { Alert, Button, Card, CardBody, CardHeader, Chip, IconButton, Loading, Switch, TextField, confirm } from '../ui'
 
 const CHANGELOG_URL = 'https://github.com/traceonx/shop-cashback/blob/main/CHANGELOG.md'
 
+type AutoUpdate = { enabled: boolean; cron: string; next: string | null }
 type Version = { version: string; commit: string; builtAt: string | null }
 type Status = {
   current: Version
@@ -14,6 +15,7 @@ type Status = {
   imageChanged: boolean | null
   imageError: string | null
   hasUpdate: boolean
+  autoUpdate: AutoUpdate
   docker: { available: boolean; reason: string; name?: string; image?: string }
   state: {
     running: boolean
@@ -31,6 +33,8 @@ const phaseText: Record<string, string> = { prepare: '准备中', pull: '下载�
 /** 版本与一键更新：显示当前 / 最新版本，更新时实时显示下载进度 */
 export function SystemUpdate() {
   const [status, setStatus] = useState<Status>()
+  const [cron, setCron] = useState('')
+  const [savingAuto, setSavingAuto] = useState(false)
   const [error, setError] = useState('')
   const [restarting, setRestarting] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -41,6 +45,7 @@ export function SystemUpdate() {
     try {
       const s = await api<Status>('/system/update')
       setStatus(s)
+      setCron((c) => c || s.autoUpdate.cron)
       setError('')
       if (before.current && s.current.version !== before.current) {
         setRestarting(false)
@@ -86,6 +91,21 @@ export function SystemUpdate() {
       setError(errorText(e))
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function saveAuto(enabled: boolean) {
+    if (!status) return
+    setSavingAuto(true)
+    setError('')
+    try {
+      const autoUpdate = await api<AutoUpdate>('/system/update/auto', { method: 'PUT', body: JSON.stringify({ enabled, cron }) })
+      setStatus({ ...status, autoUpdate })
+      setCron(autoUpdate.cron)
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setSavingAuto(false)
     }
   }
 
@@ -138,6 +158,29 @@ export function SystemUpdate() {
               </b>
             </p>
           </div>
+        </div>
+
+        <div className="update-panel">
+          <div className="auto-update">
+            <Switch checked={status.autoUpdate.enabled} label="自动更新" onChange={(v) => !savingAuto && void saveAuto(v)} />
+            <TextField
+              dense
+              icon={Clock3}
+              aria-label="自动更新 cron 表达式"
+              placeholder="0 4 * * *"
+              className="auto-update-cron"
+              value={cron}
+              onChange={(e) => setCron(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void saveAuto(status.autoUpdate.enabled)}
+            />
+            {cron.trim() !== status.autoUpdate.cron && (
+              <Button variant="tonal" icon={Save} loading={savingAuto} onClick={() => saveAuto(status.autoUpdate.enabled)}>
+                保存
+              </Button>
+            )}
+            {status.autoUpdate.enabled && status.autoUpdate.next && <small className="text-faint">下次检查：{dateTime(status.autoUpdate.next)}</small>}
+          </div>
+          <p className="text-faint">按 cron 表达式（分 时 日 月 周，北京时间）检查新版本，有更新时自动执行，服务会重启约 1 分钟；默认每天 04:00。</p>
         </div>
 
         {error && <Alert tone="error">{error}</Alert>}

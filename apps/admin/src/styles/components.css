@@ -806,6 +806,34 @@
   width: 72px;
   height: 72px;
 }
+/* 平台角标：缩略图左上角的斜向丝带 */
+.thumb-wrap {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+.platform-ribbon {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.platform-ribbon > span {
+  position: absolute;
+  top: 7px;
+  left: -13px;
+  width: 50px;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  transform: rotate(-45deg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
 
 /* 描述列表 */
 .desc-list {

@@ -9,6 +9,8 @@ import { BadRequestException, ConflictException, ServiceUnavailableException } f
 import { version as appVersion } from './version'
 import { outboundFetch, activeProxy } from './proxy'
 import { parseHubRef, remoteImage, downloadImage, dockerArchive } from './registry-pull'
+import { db } from './database'
+import { parseCron, cronMatches, nextCron } from './cron'
 
 const socketPath = process.env.UPDATE_DOCKER_SOCKET || '/var/run/docker.sock'
 const watchtowerImage = process.env.UPDATE_WATCHTOWER_IMAGE || 'containrrr/watchtower:latest'
@@ -210,6 +212,46 @@ async function remoteImageChanged(image: string) {
   return digestCache
 }
 
+const AUTO_KEY = 'auto-update'
+export const DEFAULT_CRON = '0 4 * * *'
+type AutoUpdate = { enabled: boolean; cron: string; next: string | null }
+/** 自动更新设置（默认关闭，每天 04:00 检查），保存在 system_config */
+export async function autoUpdateConfig(): Promise<AutoUpdate> {
+  const row = await db.systemConfig.findUnique({ where: { key: AUTO_KEY } })
+  const v = (row?.value || {}) as { enabled?: boolean; cron?: string }
+  const cron = v.cron || DEFAULT_CRON
+  let next: string | null = null
+  try {
+    next = v.enabled ? nextCron(parseCron(cron))?.toISOString() ?? null : null
+  } catch {}
+  return { enabled: v.enabled === true, cron, next }
+}
+export async function setAutoUpdate(enabled: boolean, cron: string) {
+  try {
+    parseCron(cron)
+  } catch (e) {
+    throw new BadRequestException((e as Error).message)
+  }
+  const value = { enabled, cron: cron.trim().replace(/\s+/g, ' ') }
+  await db.systemConfig.upsert({ where: { key: AUTO_KEY }, create: { key: AUTO_KEY, value }, update: { value } })
+  console.log(`[一键更新] 自动更新已${enabled ? `开启（${value.cron}）` : '关闭'}`)
+  return autoUpdateConfig()
+}
+
+/** 每分钟调用：开启且命中 cron 时检查新版本，有更新且一键更新可用就自动执行；上次失败后 6 小时内不重试 */
+export async function autoUpdateTick(now = new Date()) {
+  if (state.running) return
+  const c = await autoUpdateConfig()
+  if (!c.enabled || !cronMatches(parseCron(c.cron), now)) return
+  if (state.success === false && Date.now() - Date.parse(state.finishedAt || '') < 6 * 3600000) return
+  latestCache = null
+  digestCache = null
+  const s = await updateStatus()
+  if (!s.hasUpdate || !s.docker.available) return console.log('[一键更新] 自动更新检查：已是最新版本')
+  console.log(`[一键更新] 自动更新：发现新版本 ${s.latest ? 'v' + s.latest : '镜像'}，开始更新`)
+  await startUpdate()
+}
+
 export async function updateStatus() {
   const docker = await dockerStatus()
   const image = ('image' in docker && docker.image) || 'sunqz/shop-cashback:latest'
@@ -224,6 +266,7 @@ export async function updateStatus() {
     imageChanged: remote?.changed ?? null,
     imageError: remote?.error || null,
     hasUpdate: (!!latest.version && newer(latest.version, appVersion.version)) || remote?.changed === true,
+    autoUpdate: await autoUpdateConfig(),
     docker,
     state,
   }

@@ -47,7 +47,7 @@ import { platform, listPlatforms } from './platforms/registry'
 import { integrationStatus, saveConfig, testConnection, readConfig, type Provider } from './integrations'
 import { decryptCallback, receiveCallback, processInbox } from './wecom'
 import { version as appVersion, versionText } from './version'
-import { updateStatus, startUpdate } from './update'
+import { updateStatus, startUpdate, setAutoUpdate, autoUpdateTick } from './update'
 const secret = requireEnv('JWT_SECRET')
 if (secret.length < 32) throw new Error('JWT_SECRET 至少 32 字符')
 type AuthRequest = Request & { actor?: { id: string; role: string; name: string }; traceId?: string }
@@ -464,6 +464,12 @@ class AdminController {
     await audit(req.actor!.id, '一键更新', 'system', req.traceId!, { fromVersion: appVersion.version })
     return { data }
   }
+  @Put('system/update/auto') async systemAutoUpdate(@Body() body: { enabled?: unknown; cron?: unknown }, @Req() req: AuthRequest) {
+    if (typeof body?.enabled !== 'boolean' || typeof body.cron !== 'string') throw new BadRequestException('参数不正确')
+    const data = await setAutoUpdate(body.enabled, body.cron)
+    await audit(req.actor!.id, data.enabled ? '开启自动更新' : '关闭自动更新', 'system', req.traceId!, { enabled: data.enabled, cron: data.cron })
+    return { data }
+  }
   @Get('wecom/menu') async menu() { return { data: await getMenu() } }
   @Put('wecom/menu') async saveMenu(@Body() body: { draft?: unknown }, @Req() req: AuthRequest) {
     return { data: await saveMenu(body?.draft, req.actor!.id, req.traceId!) }
@@ -568,6 +574,12 @@ async function bootstrap() {
   orderTimer.unref()
   // 自动同步最近订单：按转链活跃度在 15 秒～10 分钟之间动态调整间隔
   startAutoSync()
+  // 自动更新（默认关闭）：每分钟对齐整分检查一次 cron 是否命中
+  const autoUpdate = () => void autoUpdateTick().catch((e) => console.warn(`[一键更新] 自动更新检查失败：${e instanceof Error ? e.message : e}`))
+  setTimeout(() => {
+    autoUpdate()
+    setInterval(autoUpdate, 60000).unref()
+  }, 60000 - (Date.now() % 60000) + 1000).unref()
   app.enableShutdownHooks()
 }
 void bootstrap().catch(() => {
