@@ -2,12 +2,13 @@
 // 通过 Docker Engine API 临时启动 watchtower（--run-once），拉取当前标签的新镜像并按原配置重建本容器。
 // 本进程会在更新过程中被替换，因此状态写入 DATA_DIR/update-state.json，重启后据版本号判断结果。
 import { request } from 'node:http'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { BadRequestException, ConflictException, ServiceUnavailableException } from '@nestjs/common'
 import { version as appVersion } from './version'
-import { outboundFetch } from './proxy'
+import { outboundFetch, activeProxy } from './proxy'
+import { parseHubRef, remoteImage, downloadImage, dockerArchive } from './registry-pull'
 
 const socketPath = process.env.UPDATE_DOCKER_SOCKET || '/var/run/docker.sock'
 const watchtowerImage = process.env.UPDATE_WATCHTOWER_IMAGE || 'containrrr/watchtower:latest'
@@ -108,12 +109,14 @@ function dockerStream(method: string, path: string, onLine: (line: Record<string
   })
 }
 let apiPrefix = ''
+let dockerArch = 'amd64'
 async function api(method: string, path: string, body?: unknown, timeout?: number) {
   if (!apiPrefix) {
     const v = await docker('GET', '/version')
-    const parsed = JSON.parse(v.text || '{}') as { ApiVersion?: string }
+    const parsed = JSON.parse(v.text || '{}') as { ApiVersion?: string; Arch?: string }
     if (v.status !== 200 || !parsed.ApiVersion) throw new Error(`无法读取 Docker 版本：HTTP ${v.status}`)
     apiPrefix = `/v${parsed.ApiVersion}`
+    dockerArch = parsed.Arch || 'amd64'
   }
   return docker(method, apiPrefix + path, body, timeout)
 }
@@ -273,12 +276,67 @@ async function pullWithProgress(ref: string, onProgress?: (p: Progress) => void)
   if (status !== 200 || error) throw new ServiceUnavailableException(`拉取 ${ref} 失败：${error || `HTTP ${status}`}`)
 }
 
+/** 把 docker-archive 流式交给守护进程导入（POST /images/load） */
+function dockerLoad(source: AsyncIterable<Buffer>) {
+  return new Promise<void>((ok, fail) => {
+    const req = request({ socketPath, path: `${apiPrefix}/images/load`, method: 'POST', headers: { Host: 'docker', 'Content-Type': 'application/x-tar' } }, (res) => {
+      let text = ''
+      res.setEncoding('utf8')
+      res.on('data', (c) => (text += c))
+      res.on('end', () => {
+        const error = text.split('\n').map((l) => { try { return JSON.parse(l).error } catch { return null } }).find(Boolean)
+        if (res.statusCode !== 200 || error) fail(new Error(`导入镜像失败：${error || `HTTP ${res.statusCode} ${text.slice(0, 200)}`}`))
+        else ok()
+      })
+    })
+    req.on('error', fail)
+    ;(async () => {
+      for await (const chunk of source) if (!req.write(chunk)) await new Promise((r) => req.once('drain', r))
+      req.end()
+    })().catch((e) => req.destroy(e))
+  })
+}
+const viaProxy = (ref: string) => !!activeProxy('dockerhub') && !!parseHubRef(ref)
+const workDir = () => join(process.env.DATA_DIR || resolve(__dirname, '../../../data'), 'update-tmp')
+/** 经代理下载并导入镜像（参照 MoviePilot：更新内容走 PROXY_HOST） */
+async function proxyPull(ref: string, remote: Awaited<ReturnType<typeof remoteImage>>, onProgress?: (p: Progress) => void) {
+  const dir = workDir()
+  try {
+    const d = await downloadImage(remote, ref, dir, (p) => onProgress?.({ percent: p.total ? Math.min(95, Math.round((p.current / p.total) * 95)) : 0, ...p }))
+    onProgress?.({ percent: 97, current: 0, total: 0, layers: d.layerFiles.length, done: d.layerFiles.length })
+    await dockerLoad(dockerArchive(d))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+/** 确保本地有该镜像（用于 watchtower）：已存在则跳过 */
+async function ensureImage(ref: string) {
+  const local = await api('GET', `/images/${encodeURIComponent(ref)}/json`)
+  if (local.status === 200) return
+  if (viaProxy(ref)) return proxyPull(ref, await remoteImage(ref, dockerArch))
+  return pullWithProgress(ref)
+}
+
 async function runUpdate(container: string, image: string) {
   const mb = (n: number) => (n / 1048576).toFixed(1)
   persist({ ...state, phase: 'pull', progress: { percent: 0, current: 0, total: 0, layers: 0, done: 0 }, message: '正在下载新镜像' })
-  await pullWithProgress(image, (p) =>
-    persist({ ...state, progress: p, message: p.total ? `正在下载新镜像 ${mb(p.current)} / ${mb(p.total)} MB` : '正在下载新镜像' }, true),
-  )
+  const report = (p: Progress) =>
+    persist({ ...state, progress: p, message: p.percent >= 97 ? '正在导入镜像到 Docker' : p.total ? `正在下载新镜像 ${mb(p.current)} / ${mb(p.total)} MB` : '正在下载新镜像' }, true)
+  if (viaProxy(image)) {
+    // 经 PROXY_HOST 直接从 Docker Hub 下载：先比对远程清单，相同则无需下载
+    persist({ ...state, message: '正在经代理读取远程镜像信息' })
+    const remote = await remoteImage(image, dockerArch)
+    const cur0 = JSON.parse((await api('GET', `/containers/${encodeURIComponent(container)}/json`)).text || '{}') as { Image?: string }
+    const localImg = cur0.Image ? (JSON.parse((await api('GET', `/images/${encodeURIComponent(cur0.Image)}/json`)).text || '{}') as { Id?: string; RepoDigests?: string[] }) : {}
+    const known = [remote.config.digest, remote.manifestDigest, remote.indexDigest].filter(Boolean) as string[]
+    if (known.includes(cur0.Image || '') || known.includes(localImg.Id || '') || (localImg.RepoDigests || []).some((d) => known.some((k) => d.endsWith('@' + k)))) {
+      persist({ ...state, running: false, phase: undefined, progress: undefined, success: true, finishedAt: new Date().toISOString(), message: '已是最新镜像，无需更新（如刚推送代码，请等待 GitHub Actions 构建完成后重试）' })
+      return
+    }
+    await proxyPull(image, remote, report)
+  } else {
+    await pullWithProgress(image, report)
+  }
   // 比较当前容器使用的镜像与刚拉取的镜像，相同则无需重建
   const [cur, img] = await Promise.all([api('GET', `/containers/${encodeURIComponent(container)}/json`), api('GET', `/images/${encodeURIComponent(image)}/json`)])
   const currentId = (JSON.parse(cur.text || '{}') as { Image?: string }).Image
@@ -289,7 +347,7 @@ async function runUpdate(container: string, image: string) {
   }
 
   persist({ ...state, phase: 'recreate', progress: { percent: 100, current: 0, total: 0, layers: 0, done: 0 }, message: '新镜像已下载，正在准备重建容器' })
-  await pullWithProgress(watchtowerImage) // 首次需下载 watchtower（约 10MB）
+  await ensureImage(watchtowerImage) // 首次需下载 watchtower（约 10MB），设置了 PROXY_HOST 时同样经代理
   const created = await api('POST', `/containers/create?name=shop-cashback-updater-${Date.now()}`, {
     Image: watchtowerImage,
     // --no-pull：镜像已由本服务拉取，watchtower 只负责用本地新镜像按原配置重建容器，避免其直连 Docker Hub 卡住

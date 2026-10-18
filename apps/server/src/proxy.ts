@@ -150,3 +150,26 @@ export async function outboundFetch(scope: ProxyScope, input: string | URL, init
   const c = activeProxy(scope)
   return c ? proxiedFetch(c, input, init) : fetch(input, init)
 }
+
+/** 流式 GET（大文件下载）：按服务决定是否经代理；timeoutMs 为空闲超时（期间没有任何数据即中断） */
+export async function streamGet(scope: ProxyScope, url: string, headers: Record<string, string> = {}, timeoutMs = 60000): Promise<IncomingMessage> {
+  const u = new URL(url)
+  const secure = u.protocol === 'https:'
+  const port = Number(u.port) || (secure ? 443 : 80)
+  const c = activeProxy(scope)
+  let createConnection: (() => Socket) | undefined
+  if (c) {
+    const raw = await openTunnel(c, u.hostname, port)
+    const sock = secure ? tlsConnect({ socket: raw, servername: u.hostname }) : raw
+    createConnection = () => sock as Socket
+  }
+  return new Promise((ok, fail) => {
+    const req = (secure ? httpsRequest : httpRequest)(
+      { host: u.hostname, port, path: u.pathname + u.search, method: 'GET', headers, timeout: timeoutMs, ...(createConnection ? { createConnection } : {}) },
+      ok,
+    )
+    req.on('timeout', () => req.destroy(new Error(`${u.hostname} 长时间无响应`)))
+    req.on('error', fail)
+    req.end()
+  })
+}
