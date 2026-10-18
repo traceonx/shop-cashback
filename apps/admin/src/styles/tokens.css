@@ -1,0 +1,93 @@
+/*
+ * 设计令牌：配色、字体、圆角、阴影、间距。
+ * 参照 MoviePilot（Vuetify Materio 主题），浅色 / 深色两套，组件样式只引用这里的变量。
+ */
+:root {
+  --primary-rgb: 141, 81, 249;
+  --success-rgb: 86, 202, 0;
+  --info-rgb: 22, 177, 255;
+  --warning-rgb: 255, 180, 0;
+  --error-rgb: 255, 76, 81;
+  --secondary-rgb: 138, 141, 147;
+  --on-surface-rgb: 58, 53, 65;
+
+  --c-primary: rgb(var(--primary-rgb));
+  --c-success: rgb(var(--success-rgb));
+  --c-info: rgb(var(--info-rgb));
+  --c-warning: rgb(var(--warning-rgb));
+  --c-error: rgb(var(--error-rgb));
+  --c-secondary: rgb(var(--secondary-rgb));
+
+  --c-bg: #f4f5fa;
+  --c-surface: #ffffff;
+  --c-surface-2: #f9fafc; /* 表头、信息条等次级底色 */
+  --c-surface-hover: rgba(var(--on-surface-rgb), 0.04);
+  --c-text: rgba(var(--on-surface-rgb), 0.87);
+  --c-text-2: rgba(var(--on-surface-rgb), 0.6);
+  --c-text-3: rgba(var(--on-surface-rgb), 0.38);
+  --c-border: rgba(var(--on-surface-rgb), 0.12);
+  --c-border-strong: rgba(var(--on-surface-rgb), 0.24);
+  --c-overlay: rgba(58, 53, 65, 0.5);
+
+  --gradient-primary: linear-gradient(270deg, rgb(var(--primary-rgb)), #fff 300%);
+
+  --font-sans: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, -apple-system,
+    'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 2px 4px rgba(var(--on-surface-rgb), 0.08);
+  --shadow-card: none; /* MoviePilot 卡片为扁平白底，无阴影 */
+  --shadow-lg: 0 8px 28px rgba(var(--on-surface-rgb), 0.16);
+  --shadow-primary: 0 4px 14px -4px rgba(var(--on-surface-rgb), 0.08), 0 4px 8px -4px rgba(var(--on-surface-rgb), 0.12);
+
+  --nav-width: 260px;
+  --navbar-height: 64px;
+  --page-gutter: 12px;
+  --gap: 16px;
+
+  --z-nav: 20;
+  --z-navbar: 15;
+  --z-modal: 40;
+  --z-toast: 60;
+
+  color-scheme: light;
+}
+
+/* 深色：系统偏好且未手动选择浅色，或手动选择深色 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --primary-rgb: 141, 120, 255;
+    --on-surface-rgb: 231, 227, 252;
+    --c-bg: #0e1116;
+    --c-surface: #14161f;
+    --c-surface-2: #1b1e2a;
+    --c-overlay: rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.5);
+    --shadow-primary: 0 4px 10px -4px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --primary-rgb: 141, 120, 255;
+  --on-surface-rgb: 231, 227, 252;
+  --c-bg: #0e1116;
+  --c-surface: #14161f;
+  --c-surface-2: #1b1e2a;
+  --c-overlay: rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --shadow-primary: 0 4px 10px -4px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --page-gutter: 8px;
+    --gap: 12px;
+    --navbar-height: 56px;
+  }
+}

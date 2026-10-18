@@ -401,7 +401,7 @@ class AdminController {
   @Get('service-status') async serviceStatus() {
     return {
       data: await Promise.all(
-        (['jd', 'wecom'] as const).map(async (kind) => {
+        (['jd', 'taobao', 'wecom'] as const).map(async (kind) => {
           const s = await integrationStatus(kind)
           return { kind, configured: s.configured, test: s.test }
         }),

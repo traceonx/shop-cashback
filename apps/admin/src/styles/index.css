@@ -1,0 +1,6 @@
+/* 样式入口：令牌 → 基础 → 组件 → 布局 → 页面 */
+@import './tokens.css';
+@import './base.css';
+@import './components.css';
+@import './layout.css';
+@import './pages.css';
