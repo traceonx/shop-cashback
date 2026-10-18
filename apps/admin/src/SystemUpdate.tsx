@@ -10,7 +10,28 @@ type Status = {
   imageError: string | null
   hasUpdate: boolean
   docker: { available: boolean; reason: string; name?: string; image?: string }
-  state: { running: boolean; fromVersion?: string; startedAt?: string; finishedAt?: string; success?: boolean | null; message?: string; log?: string }
+  state: {
+    running: boolean
+    phase?: 'prepare' | 'pull' | 'recreate' | 'restarting'
+    progress?: { percent: number; current: number; total: number; layers: number; done: number }
+    fromVersion?: string
+    startedAt?: string
+    finishedAt?: string
+    success?: boolean | null
+    message?: string
+    log?: string
+  }
+}
+const steps = [
+  { key: 'pull', label: '下载新镜像' },
+  { key: 'recreate', label: '重建容器' },
+  { key: 'restarting', label: '服务重启' },
+] as const
+const mb = (n = 0) => (n / 1048576).toFixed(1)
+const elapsed = (from?: string) => {
+  if (!from) return ''
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(from)) / 1000))
+  return s >= 60 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${s} 秒`
 }
 const time = (v?: string | null) => (v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '—')
 
@@ -43,7 +64,7 @@ export function SystemUpdate() {
   }, [load])
   useEffect(() => {
     if (!status?.state.running && !restarting) return
-    const timer = setInterval(() => void load(), 3000)
+    const timer = setInterval(() => void load(), 1500)
     return () => clearInterval(timer)
   }, [status?.state.running, restarting, load])
 
@@ -91,9 +112,33 @@ export function SystemUpdate() {
       </table>
       {error && <p className="error-box" role="alert">{error}</p>}
       {!docker.available && <div className="info-box"><span>一键更新不可用：{docker.reason}</span></div>}
-      {restarting ? (
-        <div className="info-box"><span>服务正在重启，完成后页面会自动刷新…</span></div>
-      ) : state.message ? (
+      {running && (
+        <div className="update-progress" role="status" aria-live="polite">
+          <ol className="update-steps">
+            {steps.map((st, i) => {
+              const at = restarting ? 2 : state.phase === 'restarting' ? 2 : state.phase === 'recreate' ? 1 : 0
+              return <li key={st.key} className={i < at ? 'done' : i === at ? 'active' : ''}><i>{i < at ? '✓' : i + 1}</i>{st.label}</li>
+            })}
+          </ol>
+          {(state.phase === 'pull' || state.phase === 'prepare') && !restarting && (
+            <>
+              <div className="update-bar"><span style={{ width: `${state.progress?.percent ?? 0}%` }} /></div>
+              <p className="update-meta">
+                <b>{state.progress?.percent ?? 0}%</b>
+                {state.progress?.total ? ` · ${mb(state.progress.current)} / ${mb(state.progress.total)} MB · 镜像层 ${state.progress.done}/${state.progress.layers}` : ' · 正在连接镜像仓库…'}
+              </p>
+            </>
+          )}
+          {(state.phase === 'recreate' || state.phase === 'restarting' || restarting) && (
+            <div className="update-bar indeterminate"><span /></div>
+          )}
+          <p className="update-meta">
+            {restarting ? '服务正在重启，完成后页面会自动刷新…' : state.message}
+            {state.startedAt && <span> · 已用时 {elapsed(state.startedAt)}</span>}
+          </p>
+        </div>
+      )}
+      {running ? null : state.message ? (
         <div className={state.running ? 'info-box' : state.success === false ? 'error-box' : 'save-success'}>
           <span>{state.running ? '更新中：' : `上次更新（${time(state.finishedAt || state.startedAt)}）：`}{state.message}</span>
         </div>

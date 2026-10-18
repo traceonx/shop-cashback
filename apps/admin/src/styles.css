@@ -3026,3 +3026,21 @@ input[type='date'] {
   .log-levels button { min-width: 0; padding: 0 10px; }
   .log-head h2 { font-size: 18px; }
 }
+
+/* 一键更新进度 */
+.update-progress { margin: 14px 0; padding: 16px 18px; border: 1px solid #e6e2f6; border-radius: 12px; background: #faf9fe; }
+.update-steps { display: flex; gap: 8px; margin: 0 0 14px; padding: 0; list-style: none; flex-wrap: wrap; }
+.update-steps li { display: flex; align-items: center; gap: 6px; color: #9a98a8; font-size: 13px; }
+.update-steps li + li::before { content: ''; width: 28px; height: 1px; margin-right: 2px; background: #d9d6e6; }
+.update-steps i { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #ecebf2; font-style: normal; font-size: 12px; }
+.update-steps li.active { color: var(--purple); font-weight: 600; }
+.update-steps li.active i { background: var(--purple); color: #fff; }
+.update-steps li.done { color: #45b81f; }
+.update-steps li.done i { background: #e3f6dc; color: #45b81f; }
+.update-bar { position: relative; height: 8px; border-radius: 4px; background: #ecebf2; overflow: hidden; }
+.update-bar span { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--purple); transition: width 0.4s ease; }
+.update-bar.indeterminate span { width: 35%; animation: update-slide 1.2s ease-in-out infinite; }
+@keyframes update-slide { 0% { left: -35%; } 100% { left: 100%; } }
+.update-meta { margin: 8px 0 0; font-size: 13px; color: #6b6880; }
+.update-meta b { color: var(--purple); }
+@media (prefers-reduced-motion: reduce) { .update-bar.indeterminate span { animation: none; width: 100%; opacity: 0.4; } }

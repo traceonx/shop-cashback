@@ -13,10 +13,15 @@ const watchtowerImage = process.env.UPDATE_WATCHTOWER_IMAGE || 'containrrr/watch
 const stateFile = join(process.env.DATA_DIR || resolve(__dirname, '../../../data'), 'update-state.json')
 const disabled = process.env.UPDATE_ENABLED === 'false'
 
+type Phase = 'prepare' | 'pull' | 'recreate' | 'restarting'
+type Progress = { percent: number; current: number; total: number; layers: number; done: number }
 type State = {
   running: boolean
+  phase?: Phase
+  progress?: Progress
   fromVersion?: string
   startedAt?: string
+  updatedAt?: string
   finishedAt?: string
   success?: boolean | null
   message?: string
@@ -31,7 +36,11 @@ function load(): State {
     if (saved.running) {
       // 进程被替换后重新启动：版本变化即更新成功；超过 15 分钟仍未变化视为失败
       if (saved.fromVersion && saved.fromVersion !== appVersion.version)
-        return persist({ ...saved, running: false, success: true, finishedAt: new Date().toISOString(), message: `已从 v${saved.fromVersion} 更新到 v${appVersion.version}` })
+        return persist({ ...saved, running: false, phase: undefined, success: true, finishedAt: new Date().toISOString(), message: `已从 v${saved.fromVersion} 更新到 v${appVersion.version}` })
+      if (saved.phase === 'restarting')
+        return persist({ ...saved, running: false, phase: undefined, success: true, finishedAt: new Date().toISOString(), message: `已使用新镜像重启（当前 v${appVersion.version}）` })
+      if (saved.phase === 'pull' || saved.phase === 'prepare')
+        return persist({ ...saved, running: false, phase: undefined, success: false, finishedAt: new Date().toISOString(), message: '更新被中断（服务在下载镜像时重启），请重试' })
       if (Date.now() - Date.parse(saved.startedAt || '') > 15 * 60000)
         return persist({ ...saved, running: false, success: false, finishedAt: new Date().toISOString(), message: '更新未完成：服务已重启但版本未变化，请查看 watchtower 日志' })
     }
@@ -40,9 +49,13 @@ function load(): State {
     return { running: false }
   }
 }
-function persist(next: State) {
+let lastWrite = 0
+function persist(next: State, throttle = false) {
   if (next.message && next.message !== state.message) console[next.success === false ? 'warn' : 'log'](`[一键更新] ${next.message}`)
-  state = next
+  state = { ...next, updatedAt: new Date().toISOString() }
+  next = state
+  if (throttle && Date.now() - lastWrite < 1000) return next
+  lastWrite = Date.now()
   try {
     mkdirSync(dirname(stateFile), { recursive: true })
     writeFileSync(stateFile, JSON.stringify(next, null, 2))
@@ -66,6 +79,31 @@ function docker(method: string, path: string, body?: unknown, timeout = 30000) {
     req.on('timeout', () => req.destroy(new Error('Docker API 请求超时')))
     req.on('error', fail)
     req.end(data)
+  })
+}
+// 流式请求：逐行回调 JSON；超过 idleMs 没有任何数据视为卡住
+function dockerStream(method: string, path: string, onLine: (line: Record<string, any>) => void, idleMs = 180000) {
+  return new Promise<number>((ok, fail) => {
+    const req = request({ socketPath, path, method, headers: { Host: 'docker' } }, (res) => {
+      let buffer = ''
+      let idle = setTimeout(() => req.destroy(new Error('长时间没有下载进度，请检查 NAS 的网络或 Docker 镜像加速配置')), idleMs)
+      res.setEncoding('utf8')
+      res.on('data', (chunk: string) => {
+        clearTimeout(idle)
+        idle = setTimeout(() => req.destroy(new Error('长时间没有下载进度，请检查 NAS 的网络或 Docker 镜像加速配置')), idleMs)
+        buffer += chunk
+        let i: number
+        while ((i = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, i).trim()
+          buffer = buffer.slice(i + 1)
+          if (line) try { onLine(JSON.parse(line)) } catch {}
+        }
+      })
+      res.on('end', () => { clearTimeout(idle); ok(res.statusCode || 0) })
+      res.on('error', (e) => { clearTimeout(idle); fail(e) })
+    })
+    req.on('error', fail)
+    req.end()
   })
 }
 let apiPrefix = ''
@@ -122,7 +160,9 @@ async function latestVersion(repo: string) {
   if (latestCache && latestCache.repo === repo && Date.now() - latestCache.at < 10 * 60000) return latestCache
   try {
     const [namespace, name] = repo.includes('/') ? repo.split('/') : ['library', repo]
-    const res = await fetch(`https://hub.docker.com/v2/namespaces/${namespace}/repositories/${name}/tags?page_size=100&ordering=last_updated`, { signal: AbortSignal.timeout(10000) })
+    // UPDATE_HUB_API：可选，hub.docker.com 的反向代理基址（与企业微信代理同理），国内网络无法直连时使用
+    const base = (process.env.UPDATE_HUB_API || 'https://hub.docker.com').replace(/\/+$/, '')
+    const res = await fetch(`${base}/v2/namespaces/${namespace}/repositories/${name}/tags?page_size=100&ordering=last_updated`, { signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`Docker Hub HTTP ${res.status}`)
     const tags = ((await res.json()) as { results?: { name: string }[] }).results || []
     const versions = tags.map((t) => t.name).filter((t) => /^\d+\.\d+\.\d+$/.test(t))
@@ -176,7 +216,7 @@ export async function updateStatus() {
   return {
     current: appVersion,
     latest: latest.version,
-    latestError: latest.error ? `无法访问 Docker Hub（${latest.error}）` : null,
+    latestError: latest.error ? `无法访问 Docker Hub（${latest.error}），可设置 UPDATE_HUB_API 代理` : null,
     imageChanged: remote?.changed ?? null,
     imageError: remote?.error || null,
     hasUpdate: (!!latest.version && newer(latest.version, appVersion.version)) || remote?.changed === true,
@@ -189,49 +229,92 @@ export async function startUpdate() {
   if (state.running) throw new ConflictException('更新正在进行中')
   const docker = await dockerStatus()
   if (!docker.available || !('name' in docker)) throw new BadRequestException(docker.reason)
-  persist({ running: true, fromVersion: appVersion.version, startedAt: new Date().toISOString(), success: null, message: '正在拉取 watchtower 镜像', log: '' })
-  void runUpdate(docker.name!).catch((e) =>
-    persist({ ...state, running: false, success: false, finishedAt: new Date().toISOString(), message: `更新失败：${e instanceof Error ? e.message : e}` }),
+  persist({ running: true, phase: 'prepare', fromVersion: appVersion.version, startedAt: new Date().toISOString(), success: null, message: '正在准备更新', log: '' })
+  void runUpdate(docker.name!, docker.image!).catch((e) =>
+    persist({ ...state, running: false, phase: undefined, success: false, finishedAt: new Date().toISOString(), message: `更新失败：${e instanceof Error ? e.message : e}` }),
   )
   return state
 }
 
-async function runUpdate(container: string) {
-  const [image, tag = 'latest'] = watchtowerImage.split(/:(?=[^/]+$)/)
-  const pull = await api('POST', `/images/create?fromImage=${encodeURIComponent(image)}&tag=${encodeURIComponent(tag)}`, undefined, 300000)
-  const pullError = pull.text.split('\n').map((l) => { try { return JSON.parse(l).error } catch { return null } }).find(Boolean)
-  if (pull.status !== 200 || pullError) throw new ServiceUnavailableException(`拉取 ${watchtowerImage} 失败：${pullError || `HTTP ${pull.status}`}`)
+const splitImage = (ref: string) => {
+  const clean = ref.replace(/@.*$/, '')
+  const m = /^(.*?)(?::([^/:]+))?$/.exec(clean)!
+  return { repo: m[1], tag: m[2] || 'latest' }
+}
+// 通过守护进程拉取镜像（走 NAS 已配置的镜像加速），按层汇总下载 / 解压进度
+async function pullWithProgress(ref: string, onProgress?: (p: Progress) => void) {
+  const { repo, tag } = splitImage(ref)
+  const layers = new Map<string, { current: number; total: number; done: boolean }>()
+  let error = ''
+  const status = await dockerStream('POST', `${apiPrefix}/images/create?fromImage=${encodeURIComponent(repo)}&tag=${encodeURIComponent(tag)}`, (line) => {
+    if (line.error) error = String(line.error)
+    if (!line.id || !onProgress) return
+    const layer = layers.get(line.id) || { current: 0, total: 0, done: false }
+    const st = String(line.status || '')
+    if (st === 'Downloading' && line.progressDetail?.total) {
+      layer.total = line.progressDetail.total
+      layer.current = line.progressDetail.current || 0
+    } else if (/Download complete|Pull complete|Already exists/.test(st)) {
+      layer.current = layer.total
+      if (/Pull complete|Already exists/.test(st)) layer.done = true
+    } else if (st === 'Extracting' && line.progressDetail?.total) {
+      layer.total = layer.total || line.progressDetail.total
+      layer.current = layer.total
+    }
+    if (/Pulling fs layer|Waiting|Downloading|Download complete|Extracting|Pull complete|Already exists|Verifying/.test(st)) layers.set(line.id, layer)
+    const all = [...layers.values()]
+    const total = all.reduce((n, l) => n + l.total, 0), current = all.reduce((n, l) => n + l.current, 0)
+    const done = all.filter((l) => l.done).length
+    // 下载占 85%，解压完成层数占 15%
+    const percent = all.length ? Math.min(99, Math.round((total ? (current / total) * 85 : 0) + (done / all.length) * 15)) : 0
+    onProgress({ percent, current, total, layers: all.length, done })
+  })
+  if (status !== 200 || error) throw new ServiceUnavailableException(`拉取 ${ref} 失败：${error || `HTTP ${status}`}`)
+}
 
-  persist({ ...state, message: '正在启动更新任务' })
+async function runUpdate(container: string, image: string) {
+  const mb = (n: number) => (n / 1048576).toFixed(1)
+  persist({ ...state, phase: 'pull', progress: { percent: 0, current: 0, total: 0, layers: 0, done: 0 }, message: '正在下载新镜像' })
+  await pullWithProgress(image, (p) =>
+    persist({ ...state, progress: p, message: p.total ? `正在下载新镜像 ${mb(p.current)} / ${mb(p.total)} MB` : '正在下载新镜像' }, true),
+  )
+  // 比较当前容器使用的镜像与刚拉取的镜像，相同则无需重建
+  const [cur, img] = await Promise.all([api('GET', `/containers/${encodeURIComponent(container)}/json`), api('GET', `/images/${encodeURIComponent(image)}/json`)])
+  const currentId = (JSON.parse(cur.text || '{}') as { Image?: string }).Image
+  const latestId = (JSON.parse(img.text || '{}') as { Id?: string }).Id
+  if (currentId && latestId && currentId === latestId) {
+    persist({ ...state, running: false, phase: undefined, progress: undefined, success: true, finishedAt: new Date().toISOString(), message: '已是最新镜像，无需更新（如刚推送代码，请等待 GitHub Actions 构建完成后重试）' })
+    return
+  }
+
+  persist({ ...state, phase: 'recreate', progress: { percent: 100, current: 0, total: 0, layers: 0, done: 0 }, message: '新镜像已下载，正在准备重建容器' })
+  await pullWithProgress(watchtowerImage) // 首次需下载 watchtower（约 10MB）
   const created = await api('POST', `/containers/create?name=shop-cashback-updater-${Date.now()}`, {
     Image: watchtowerImage,
-    Cmd: ['--run-once', '--cleanup', container],
+    // --no-pull：镜像已由本服务拉取，watchtower 只负责用本地新镜像按原配置重建容器，避免其直连 Docker Hub 卡住
+    Cmd: ['--run-once', '--cleanup', '--no-pull', container],
     Tty: true,
-    // 国内网络直连 index.docker.io 常超时，watchtower 会自动改用守护进程拉取（走镜像加速），无需告警
-    Env: [`DOCKER_API_VERSION=${apiPrefix.slice(2)}`, 'WATCHTOWER_WARN_ON_HEAD_FAILURE=never'],
+    Env: [`DOCKER_API_VERSION=${apiPrefix.slice(2)}`],
     HostConfig: { AutoRemove: true, Binds: [`${socketPath}:/var/run/docker.sock`] },
   })
   if (created.status !== 201) throw new Error(`创建更新容器失败：HTTP ${created.status} ${created.text}`)
   const id = (JSON.parse(created.text) as { Id: string }).Id
+  persist({ ...state, phase: 'restarting', message: '正在重建容器，服务即将重启' })
   const started = await api('POST', `/containers/${id}/start`)
   if (started.status !== 204 && started.status !== 304) throw new Error(`启动更新容器失败：HTTP ${started.status} ${started.text}`)
-  persist({ ...state, message: '正在拉取新镜像，发现新版本后服务会自动重启' })
 
-  // 若有新镜像，本容器会被停止替换，下面的代码不会执行完；没有新镜像时 watchtower 正常退出
-  const logs = await api('GET', `/containers/${id}/logs?stdout=1&stderr=1&follow=1&tail=200`, undefined, 15 * 60000)
+  // 正常情况下本容器会被停止替换，下面的代码执行不到；若 watchtower 失败则记录日志
+  const logs = await api('GET', `/containers/${id}/logs?stdout=1&stderr=1&follow=1&tail=200`, undefined, 10 * 60000)
   const log = logs.text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '').trim().split('\n').slice(-15).join('\n')
   const updated = Number(/Updated=(\d+)/.exec(log)?.[1] || 0)
   const failed = Number(/Failed=(\d+)/.exec(log)?.[1] || 0)
   persist({
     ...state,
     running: false,
+    phase: undefined,
     finishedAt: new Date().toISOString(),
-    success: failed === 0,
+    success: failed === 0 && updated > 0,
     log,
-    message: failed
-      ? '更新失败，请查看下方日志'
-      : updated
-        ? '新镜像已就绪，服务即将重启'
-        : '已是最新镜像，无需更新（如刚推送代码，请等待 GitHub Actions 构建完成后重试）',
+    message: failed ? '重建容器失败，请查看下方日志' : updated ? '容器已重建，服务即将重启' : 'watchtower 未执行更新，请查看下方日志',
   })
 }
