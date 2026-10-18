@@ -7,7 +7,6 @@ export const menuActions = {
   PLATFORMS: { label: '支持平台', command: '/支持平台' },
   ORDERS: { label: '全部订单', command: '/订单' },
   PENDING: { label: '待结算', command: '/待结算' },
-  RECOVER: { label: '订单找回', command: '/订单找回' },
   BALANCE: { label: '余额与明细', command: '/余额' },
   WITHDRAW: { label: '申请提现', command: '/提现' },
   WITHDRAWALS: { label: '提现记录', command: '/提现记录' },
@@ -17,7 +16,7 @@ export type MenuAction = keyof typeof menuActions
 export type MenuDraft = { name: string; children: { name: string; action: MenuAction }[] }[]
 export const defaultMenu: MenuDraft = [
   { name: '购物返利', children: ['HELP_SHOP', 'PLATFORMS'].map((action) => ({ name: menuActions[action as MenuAction].label, action: action as MenuAction })) },
-  { name: '我的订单', children: ['ORDERS', 'PENDING', 'RECOVER'].map((action) => ({ name: menuActions[action as MenuAction].label, action: action as MenuAction })) },
+  { name: '我的订单', children: ['ORDERS', 'PENDING'].map((action) => ({ name: menuActions[action as MenuAction].label, action: action as MenuAction })) },
   { name: '我的账户', children: ['BALANCE', 'WITHDRAW', 'WITHDRAWALS', 'HELP'].map((action) => ({ name: menuActions[action as MenuAction].label, action: action as MenuAction })) },
 ]
 export function validateMenu(value: unknown): MenuDraft {
@@ -42,12 +41,20 @@ export function menuCommand(key: string): string | null {
   const action = key.slice(7)
   return Object.hasOwn(menuActions, action) ? menuActions[action as MenuAction].command : null
 }
+/** 去掉已下线的菜单动作（如「订单找回」），空分组一并移除 */
+function sanitize(value: unknown): MenuDraft | null {
+  if (!Array.isArray(value)) return null
+  const groups = (value as MenuDraft)
+    .map((g) => ({ ...g, children: (g.children || []).filter((c) => Object.hasOwn(menuActions, c.action)) }))
+    .filter((g) => g.children.length)
+  return groups.length ? groups : null
+}
 export async function getMenu() {
   const [draft, published] = await Promise.all([
     db.systemConfig.findUnique({ where: { key: 'wecom:menu:draft' } }),
     db.systemConfig.findUnique({ where: { key: 'wecom:menu:published' } }),
   ])
-  return { draft: draft?.value || defaultMenu, published: published?.value || null, actions: menuActions }
+  return { draft: sanitize(draft?.value) || defaultMenu, published: published?.value || null, actions: menuActions }
 }
 export async function saveMenu(value: unknown, actor: string, trace: string) {
   const draft = validateMenu(value)

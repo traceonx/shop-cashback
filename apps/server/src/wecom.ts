@@ -5,7 +5,6 @@ import { db, dateText } from './database'
 import { readConfig, wecomToken, wecomUrl, wecomError, type Config } from './integrations'
 import { convert, settings } from './business'
 import { menuCommand } from './wecom-menu'
-import { claimOrder } from './attribution'
 import { listPlatforms } from './platforms/registry'
 export function decryptCallback(c: Config, signature: string, timestamp: string, nonce: string, encrypted: string) {
   if (!c.token || !c.aesKey || !c.corpId) throw new BadRequestException('请先配置企业微信回调参数')
@@ -238,9 +237,6 @@ export async function processInbox() {
       if (!identity.user.enabled) reply = '当前账户已禁用，请联系管理员。'
       else if (content.trim() === '/查返利') reply = '直接发送京东、淘宝 / 天猫商品链接或含链接的分享文案，即可查询优惠与预计返现。价格和优惠以实际下单为准。'
       else if (content.trim() === '/支持平台') reply = `当前已接入：${listPlatforms().map((p) => p.name).join('、')}。\n直接发送商品链接或分享文案即可查询优惠与返现。各平台可用性取决于实际接口权限。`
-      else if (content.trim() === '/订单找回')
-        reply = '发送「找回 订单号」即可找回订单，例如：找回 312345678901\n需要在下单前 7 天内通过本应用发送过该商品链接；订单同步约有 10 分钟延迟。'
-      else if (/^\/?找回\s*\d{8,24}$/.test(content.trim())) reply = await claimOrder(id, content.trim().replace(/\D/g, ''))
       else if (content.trim() === '/余额') {
         const w = await db.walletAccount.findUnique({ where: { userId: id } })
         const amount = (n?: bigint) => `${(Number(n || 0n) / 100).toFixed(2)}`
@@ -249,21 +245,35 @@ export async function processInbox() {
         reply += entries.length ? '\n\n最近流水\n' + entries.map((entry) => `${entry.reason} ${entry.deltaCents > 0n ? '+' : ''}¥${amount(entry.deltaCents)} · ${dateText(entry.createdAt)}`).join('\n') : '\n\n暂无资金流水。'
       } else if (/^\/订单(?: \d+)?$/.test(content.trim()) || content.trim() === '/待结算') {
         const take = Math.min(20, Math.max(1, Number(content.split(' ')[1] || 5)))
-        const rows = await db.affiliateOrder.findMany({
-          where: { userId: id, ...(content.trim() === '/待结算' ? { status: 'PAID' as const } : {}) },
-          take,
-          orderBy: { placedAt: 'desc' },
-          include: { items: true },
-        })
+        const pendingOnly = content.trim() === '/待结算'
+        const plugins = listPlatforms()
+        // 按平台原始状态换算当前状态；已取消的订单不展示
+        const rows = (
+          await db.affiliateOrder.findMany({ where: { userId: id }, take: 100, orderBy: { placedAt: 'desc' }, include: { items: true } })
+        )
+          .map((o) => {
+            const plugin = plugins.find((p) => p.id === o.platform)
+            return { o, status: o.status === 'UNATTRIBUTED' && plugin ? plugin.orderStatus(o.rawStatus || '') : o.status }
+          })
+          .filter(({ status }) => status !== 'CANCELLED' && (!pendingOnly || status === 'PAID'))
+          .slice(0, take)
+        const label: Record<string, string> = { CREATED: '待付款', PAID: '已付款，待结算', COMPLETED: '已完成', UNATTRIBUTED: '待核实' }
         reply = rows.length
           ? rows
-              .map((o) => {
-                const status: Record<string, string> = { CANCELLED: '已取消', CREATED: '待付款', PAID: '已付款，待结算', COMPLETED: '已完成', UNATTRIBUTED: '待核实' }
-                const money = (v: bigint | null) => v === null ? '待确认' : `¥${(Number(v) / 100).toFixed(2)}`
-                return `${o.items[0]?.title || o.externalOrderId}\n${o.platform === 'jd' ? '京东' : o.platform} · ${status[o.status] || '待核实'}\n金额：${money(o.amountCents)}\n预计返现：${money(o.rebateCents)}\n下单：${dateText(o.placedAt)}\n订单号：${o.externalOrderId}`
-              })
+              .map(({ o, status }) =>
+                [
+                  o.items[0]?.title || o.externalOrderId,
+                  `${o.platform === 'jd' ? '京东' : o.platform === 'taobao' ? '淘宝' : o.platform} · ${label[status] || '待核实'}`,
+                  o.amountCents ? `金额：${yuan(Number(o.amountCents))}` : null,
+                  o.rebateCents != null ? `返现：${yuan(Number(o.rebateCents))}` : null,
+                  `下单：${dateText(o.placedAt)}`,
+                  `订单号：${o.externalOrderId}`,
+                ]
+                  .filter(Boolean)
+                  .join('\n'),
+              )
               .join('\n\n')
-          : content.trim() === '/待结算' ? '暂无待结算订单。' : '暂无已确认归属的订单。'
+          : pendingOnly ? '暂无待结算订单。' : '暂无订单。'
       } else if (content.trim() === '/提现记录') {
         const rows = await db.withdrawalRequest.findMany({
           where: { userId: id },
