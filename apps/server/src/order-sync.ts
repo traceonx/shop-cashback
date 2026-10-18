@@ -212,7 +212,8 @@ async function processOrderStep(): Promise<boolean> {
                   kind,
                   platform: plugin.id,
                   title: row.title,
-                  amountCents: row.commissionBaseCents,
+                  // 付款金额：优先联盟的计佣金额，未付款时为 0 则用单价 × 数量
+                  amountCents: row.commissionBaseCents || plugin.orderAmounts(row.raw).amount || null,
                   commissionCents: row.commissionCents,
                   imageUrl: plugin.orderImage(row.raw),
                   url: plugin.id === 'jd' && /^\d+$/.test(row.sku) ? `https://item.jd.com/${row.sku}.html` : null,

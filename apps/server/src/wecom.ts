@@ -141,11 +141,12 @@ export function splitTitle(title: string) {
  */
 export function orderNews(e: OrderEvent, rebate: number, total: number): News {
   const cancelled = e.kind === 'cancelled'
+  // 取消的订单只显示商品、平台和累计返利；其他状态显示付款金额与本单返现
   const lines = [
     e.title,
     `平台：${platformName[e.platform] || e.platform}`,
-    e.amountCents ? `金额：${yuan(e.amountCents)}` : null,
-    `本单返现：${cancelled ? '¥0.00' : yuan(rebate)}`,
+    !cancelled && e.amountCents ? `付款金额：${yuan(e.amountCents)}` : null,
+    cancelled ? null : `本单返现：${yuan(rebate)}`,
     `累计返利：${yuan(total)}`,
   ].filter(Boolean)
   return {
