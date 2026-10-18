@@ -3044,3 +3044,53 @@ input[type='date'] {
 .update-meta { margin: 8px 0 0; font-size: 13px; color: #6b6880; }
 .update-meta b { color: var(--purple); }
 @media (prefers-reduced-motion: reduce) { .update-bar.indeterminate span { animation: none; width: 100%; opacity: 0.4; } }
+
+/* 版本与更新（卡片式） */
+.upd-card { padding: 28px 30px; border-radius: 20px; background: #fff; box-shadow: 0 1px 2px rgba(25, 20, 60, 0.04), 0 8px 28px rgba(25, 20, 60, 0.06); }
+.upd-card .upd-head { display: flex; align-items: center; gap: 20px; }
+.upd-card .upd-icon { flex: none; display: grid; place-items: center; width: 64px; height: 64px; border-radius: 16px; background: #eeeafd; color: var(--purple); }
+.upd-card .upd-title { flex: 1; min-width: 0; }
+.upd-card .upd-title h2 { margin: 0 0 6px; line-height: 1.3; font-size: 26px; font-weight: 700; color: #16142b; }
+.upd-card .upd-title p { margin: 0; color: #8a879c; font-size: 15px; }
+.upd-card .upd-link { flex: none; display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border: 1px solid #e7e5ef; border-radius: 14px; color: #16142b; font-size: 14px; text-decoration: none; background: #fff; transition: border-color 0.15s, background 0.15s; }
+.upd-card .upd-link:hover { border-color: #cfc8f5; background: #faf9fe; }
+.upd-card .upd-info { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 26px 0 18px; padding: 18px 0; border-radius: 16px; background: #f7f6fb; }
+.upd-card .upd-info > div { min-width: 0; padding: 0 26px; }
+.upd-card .upd-info > div + div { border-left: 1px solid #e3e1ec; }
+.upd-card .upd-info span { display: block; margin-bottom: 8px; color: #6f6c82; font-size: 14px; }
+.upd-card .upd-info p { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 0; }
+.upd-card .upd-info b { font-size: 18px; color: #16142b; }
+.upd-card .upd-info small { color: #8a879c; font-size: 14px; }
+.upd-card .upd-mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.upd-card .upd-badge { padding: 3px 10px; border-radius: 8px; background: #eeeafd; color: var(--purple); font-size: 13px; font-style: normal; font-weight: 600; }
+.upd-card .upd-badge.green { background: #e6f6df; color: #3c9f1c; }
+.upd-card .upd-panel { padding: 24px 26px 20px; border: 1px solid #efedf5; border-radius: 16px; }
+.upd-card .upd-bar { position: relative; height: 10px; border-radius: 6px; background: #ecebf2; overflow: hidden; }
+.upd-card .upd-bar span { position: absolute; inset: 0 auto 0 0; border-radius: 6px; background: linear-gradient(90deg, #5b45e0, #8b74f5); transition: width 0.5s ease; }
+.upd-card .upd-bar.indeterminate span { width: 35%; animation: update-slide 1.2s ease-in-out infinite; }
+.upd-card .upd-meta { display: flex; align-items: baseline; gap: 12px; margin: 14px 0 0; color: #8a879c; font-size: 14px; }
+.upd-card .upd-meta strong { padding-right: 12px; border-right: 1px solid #e3e1ec; color: var(--purple); font-size: 26px; line-height: 1; font-weight: 700; }
+.upd-card .upd-sub { margin: 8px 0 0; color: #8a879c; font-size: 13px; }
+.upd-card .upd-result { margin: 0; font-size: 14px; }
+.upd-card .upd-result.ok { color: #3c9f1c; }
+.upd-card .upd-result.fail { color: #d1453b; }
+.upd-card .upd-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+.upd-card .upd-btn { display: inline-flex; align-items: center; gap: 10px; min-width: 150px; justify-content: center; padding: 13px 26px; border: 0; border-radius: 14px; background: var(--purple); color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; }
+.upd-card .upd-btn:disabled { cursor: not-allowed; opacity: 0.6; }
+.upd-card .upd-btn.busy, .upd-card .upd-btn.busy:disabled { background: #eeeafd; color: var(--purple); opacity: 1; }
+.upd-card .upd-spin { animation: upd-rotate 0.9s linear infinite; }
+@keyframes upd-rotate { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .upd-card .upd-bar.indeterminate span { animation: none; width: 100%; opacity: 0.4; } .upd-card .upd-spin { animation: none; } }
+@media (max-width: 720px) {
+  .upd-card { padding: 20px 16px; border-radius: 16px; }
+  .upd-card .upd-head { flex-wrap: wrap; gap: 14px; }
+  .upd-card .upd-icon { width: 52px; height: 52px; }
+  .upd-card .upd-title h2 { font-size: 21px; }
+  .upd-card .upd-title p { font-size: 13px; }
+  .upd-card .upd-link { width: 100%; justify-content: center; }
+  .upd-card .upd-info { grid-template-columns: 1fr; padding: 4px 0; }
+  .upd-card .upd-info > div { padding: 14px 18px; }
+  .upd-card .upd-info > div + div { border-left: 0; border-top: 1px solid #e3e1ec; }
+  .upd-card .upd-panel { padding: 18px 16px; }
+  .upd-card .upd-btn { width: 100%; }
+}

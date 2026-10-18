@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowRight, Box, Github, LoaderCircle } from 'lucide-react'
 import { api } from './api'
+
+const CHANGELOG_URL = 'https://github.com/traceonx/shop-cashback/blob/main/CHANGELOG.md'
 
 type Version = { version: string; commit: string; builtAt: string | null }
 type Status = {
@@ -22,11 +25,7 @@ type Status = {
     log?: string
   }
 }
-const steps = [
-  { key: 'pull', label: '下载新镜像' },
-  { key: 'recreate', label: '重建容器' },
-  { key: 'restarting', label: '服务重启' },
-] as const
+const phaseText: Record<string, string> = { prepare: '准备中', pull: '下载新镜像', recreate: '重建容器', restarting: '服务重启' }
 const mb = (n = 0) => (n / 1048576).toFixed(1)
 const elapsed = (from?: string) => {
   if (!from) return ''
@@ -87,66 +86,83 @@ export function SystemUpdate() {
   if (!status) return error ? <p className="error-box" role="alert">{error}</p> : <p>正在读取版本信息…</p>
   const { current, latest, docker, state } = status
   const running = state.running || restarting
+  const downloading = (state.phase === 'pull' || state.phase === 'prepare') && !restarting
+  const percent = restarting || state.phase === 'restarting' ? 100 : (state.progress?.percent ?? 0)
+  const lastResult = !running && state.message
   return (
-    <div>
-      <h2>版本与更新</h2>
-      <p className="muted">镜像由 GitHub Actions 自动构建并发布到 Docker Hub；一键更新会拉取当前标签的最新镜像并重建容器，数据保留在 data 卷中。</p>
-      <table>
-        <tbody>
-          <tr><th>当前版本</th><td><b>v{current.version}</b>　提交 {current.commit}　构建于 {current.builtAt || '本地开发'}</td></tr>
-          <tr>
-            <th>最新版本</th>
-            <td>
-              {latest ? <>v{latest} </> : null}
-              {status.hasUpdate ? (
-                <span className="badge purple">{latest ? '有新版本' : '镜像仓库有新镜像'}</span>
-              ) : status.imageChanged === false || latest ? (
-                <span className="badge green">已是最新</span>
-              ) : (
-                <span className="muted">无法获取（{status.imageError || status.latestError || '未知原因'}）</span>
-              )}
-            </td>
-          </tr>
-          <tr><th>运行镜像</th><td>{docker.image || '—'}{docker.name ? `（容器 ${docker.name}）` : ''}</td></tr>
-        </tbody>
-      </table>
-      {error && <p className="error-box" role="alert">{error}</p>}
-      {!docker.available && <div className="info-box"><span>一键更新不可用：{docker.reason}</span></div>}
-      {running && (
-        <div className="update-progress" role="status" aria-live="polite">
-          <ol className="update-steps">
-            {steps.map((st, i) => {
-              const at = restarting ? 2 : state.phase === 'restarting' ? 2 : state.phase === 'recreate' ? 1 : 0
-              return <li key={st.key} className={i < at ? 'done' : i === at ? 'active' : ''}><i>{i < at ? '✓' : i + 1}</i>{st.label}</li>
-            })}
-          </ol>
-          {(state.phase === 'pull' || state.phase === 'prepare') && !restarting && (
-            <>
-              <div className="update-bar"><span style={{ width: `${state.progress?.percent ?? 0}%` }} /></div>
-              <p className="update-meta">
-                <b>{state.progress?.percent ?? 0}%</b>
-                {state.progress?.total ? ` · ${mb(state.progress.current)} / ${mb(state.progress.total)} MB · 镜像层 ${state.progress.done}/${state.progress.layers}` : ' · 正在连接镜像仓库…'}
-              </p>
-            </>
-          )}
-          {(state.phase === 'recreate' || state.phase === 'restarting' || restarting) && (
-            <div className="update-bar indeterminate"><span /></div>
-          )}
-          <p className="update-meta">
-            {restarting ? '服务正在重启，完成后页面会自动刷新…' : state.message}
-            {state.startedAt && <span> · 已用时 {elapsed(state.startedAt)}</span>}
+    <section className="upd-card">
+      <header className="upd-head">
+        <div className="upd-icon" aria-hidden="true"><Box size={30} strokeWidth={2} /></div>
+        <div className="upd-title">
+          <h2>版本与更新</h2>
+          <p>自动从 GitHub Actions 获取最新镜像并更新容器，数据保留在 data 卷中。</p>
+        </div>
+        <a className="upd-link" href={CHANGELOG_URL} target="_blank" rel="noreferrer">
+          <Github size={18} />查看更新日志<ArrowRight size={16} />
+        </a>
+      </header>
+
+      <div className="upd-info">
+        <div>
+          <span>当前版本</span>
+          <p><b>v{current.version}</b><small title={current.builtAt ? `构建于 ${current.builtAt}` : '本地开发'}>{current.commit}</small></p>
+        </div>
+        <div>
+          <span>最新版本</span>
+          <p>
+            {latest ? <b>v{latest}</b> : null}
+            {status.hasUpdate ? (
+              <em className="upd-badge">{latest ? '有新版本' : '镜像仓库有新镜像'}</em>
+            ) : status.imageChanged === false || latest ? (
+              <em className="upd-badge green">已是最新</em>
+            ) : (
+              <small>无法获取（{status.imageError || status.latestError || '未知原因'}）</small>
+            )}
           </p>
         </div>
-      )}
-      {running ? null : state.message ? (
-        <div className={state.running ? 'info-box' : state.success === false ? 'error-box' : 'save-success'}>
-          <span>{state.running ? '更新中：' : `上次更新（${time(state.finishedAt || state.startedAt)}）：`}{state.message}</span>
+        <div>
+          <span>运行镜像</span>
+          <p><b className="upd-mono" title={docker.name ? `容器 ${docker.name}` : undefined}>{docker.image || '—'}</b></p>
         </div>
-      ) : null}
-      {state.log && !running && <pre className="update-log">{state.log}</pre>}
-      <button className="primary" disabled={!docker.available || running || busy} onClick={start}>
-        {running ? '更新中…' : status.hasUpdate ? (latest ? `更新到 v${latest}` : '立即更新') : '检查并更新'}
-      </button>
-    </div>
+      </div>
+
+      {error && <p className="error-box" role="alert">{error}</p>}
+      {!docker.available && <div className="info-box"><span>一键更新不可用：{docker.reason}</span></div>}
+
+      <div className="upd-panel" role={running ? 'status' : undefined} aria-live="polite">
+        {running ? (
+          <>
+            <div className={`upd-bar ${downloading ? '' : 'indeterminate'}`}>
+              <span style={downloading ? { width: `${percent}%` } : undefined} />
+            </div>
+            <p className="upd-meta">
+              {downloading && <strong>{percent}%</strong>}
+              <span>
+                {downloading && state.progress?.total
+                  ? `${mb(state.progress.current)} / ${mb(state.progress.total)} MB`
+                  : restarting
+                    ? '服务正在重启，完成后页面会自动刷新…'
+                    : state.message || phaseText[state.phase || 'prepare']}
+                {state.startedAt && ` · 已用时 ${elapsed(state.startedAt)}`}
+              </span>
+            </p>
+            {downloading && state.message && <p className="upd-sub">{state.message}</p>}
+          </>
+        ) : lastResult ? (
+          <p className={`upd-result ${state.success === false ? 'fail' : 'ok'}`}>
+            上次更新（{time(state.finishedAt || state.startedAt)}）：{state.message}
+          </p>
+        ) : (
+          <p className="upd-sub">{status.hasUpdate ? `可以更新到 v${latest ?? '最新镜像'}，更新期间服务会重启约 1 分钟。` : '当前已是最新版本，也可以手动检查一次。'}</p>
+        )}
+        {state.log && !running && <pre className="update-log">{state.log}</pre>}
+        <div className="upd-actions">
+          <button className={`upd-btn ${running ? 'busy' : ''}`} disabled={!docker.available || running || busy} onClick={start}>
+            {running && <LoaderCircle size={20} className="upd-spin" />}
+            {running ? '更新中…' : status.hasUpdate ? (latest ? `更新到 v${latest}` : '立即更新') : '检查并更新'}
+          </button>
+        </div>
+      </div>
+    </section>
   )
 }
