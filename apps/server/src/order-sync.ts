@@ -214,6 +214,8 @@ async function processOrderStep(): Promise<boolean> {
                   title: row.title,
                   amountCents: row.commissionBaseCents,
                   commissionCents: row.commissionCents,
+                  imageUrl: plugin.orderImage(row.raw),
+                  url: plugin.id === 'jd' && /^\d+$/.test(row.sku) ? `https://item.jd.com/${row.sku}.html` : null,
                 })
             }
             await tx.affiliateOrder.upsert({

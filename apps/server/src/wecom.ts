@@ -83,12 +83,15 @@ function clip(text: string, bytes: number) {
   }
   return out + '…'
 }
-async function send(c: Config, user: string, content: string | News) {
+type Card = { template_card: Record<string, unknown> }
+async function send(c: Config, user: string, content: string | News | Card) {
   const token = await wecomToken(c)
   const body =
     typeof content === 'string'
       ? { msgtype: 'text', text: { content } }
-      : {
+      : 'template_card' in content
+        ? { msgtype: 'template_card', template_card: content.template_card }
+        : {
           msgtype: 'news',
           news: {
             articles: [
@@ -121,9 +124,79 @@ export type OrderEvent = {
   title: string
   amountCents: number | null
   commissionCents: number | null
+  imageUrl?: string | null
+  url?: string | null
 }
 const platformName: Record<string, string> = { jd: '京东', taobao: '淘宝' }
-/** 订单状态变化时通知下单用户（企业微信应用消息）；未启用企业微信或用户无企业微信身份时跳过 */
+const orderHead = {
+  created: '✅ 下单成功，已记录返利',
+  paid: '💳 订单已付款',
+  completed: '🎉 订单已完成，返现进入待结算',
+  cancelled: '❌ 订单已取消，本单不产生返现',
+}
+/** 拆出标题末尾的【标签】，如「皇家猫粮…3.5KG【宠物金选】」→ 标题 + 「宠物金选」 */
+export function splitTitle(title: string) {
+  const m = /^(.*?)\s*【([^】]{1,20})】\s*$/.exec(title)
+  return m ? { name: m[1], tag: m[2] } : { name: title, tag: '' }
+}
+/**
+ * 订单通知卡片（企业微信模板卡片）：
+ * 有商品图时用图文卡片（左图右文 + 累计返利），没有图时用文本卡片（累计返利大字突出）。
+ */
+export function orderCard(e: OrderEvent, rebate: number, total: number) {
+  const { name, tag } = splitTitle(e.title)
+  const cancelled = e.kind === 'cancelled'
+  const rows = [
+    { keyname: '平台', value: platformName[e.platform] || e.platform },
+    ...(e.amountCents ? [{ keyname: '金额', value: yuan(e.amountCents) }] : []),
+    { keyname: '本单返现', value: cancelled ? '¥0.00' : yuan(rebate) },
+  ]
+  const common = {
+    source: { desc: '拾惠' },
+    main_title: { title: clip(orderHead[e.kind], 72) },
+    horizontal_content_list: rows,
+    card_action: { type: 1, url: e.url || 'https://www.jd.com' },
+  }
+  if (e.imageUrl)
+    return {
+      template_card: {
+        card_type: 'news_notice',
+        ...common,
+        image_text_area: { type: 0, title: clip(name, 100), desc: tag || platformName[e.platform] || '', image_url: e.imageUrl },
+        vertical_content_list: [{ title: `累计返利 ${yuan(total)}`, desc: cancelled ? '本单已取消，不计入累计返利' : '含本单，确认收货后进入待结算' }],
+      },
+    }
+  return {
+    template_card: {
+      card_type: 'text_notice',
+      ...common,
+      emphasis_content: { title: yuan(total), desc: '累计返利' },
+      sub_title_text: clip(tag ? `${name} · ${tag}` : name, 160),
+    },
+  }
+}
+/** 用户当前累计返利（未取消订单的预计返现之和，比例优先取下单快照） */
+async function totalRebate(userId: string, basisPoints: number) {
+  const orders = await db.affiliateOrder.findMany({
+    where: { userId },
+    select: { platform: true, status: true, rawStatus: true, rawData: true, commissionCents: true, rebateCents: true, ruleSnapshot: true },
+  })
+  let sum = 0
+  for (const o of orders) {
+    const plugin = listPlatforms().find((p) => p.id === o.platform)
+    const status = o.status === 'UNATTRIBUTED' && plugin ? plugin.orderStatus(o.rawStatus || '') : o.status
+    if (status === 'CANCELLED') continue
+    if (o.rebateCents != null) {
+      sum += Number(o.rebateCents)
+      continue
+    }
+    const commission = plugin?.orderAmounts(o.rawData).commission ?? (o.commissionCents == null ? null : Number(o.commissionCents))
+    const bp = (o.ruleSnapshot as { basisPoints?: number } | null)?.basisPoints ?? basisPoints
+    if (commission != null) sum += Math.floor((commission * bp) / 10000)
+  }
+  return sum
+}
+/** 订单状态变化时通知下单用户；未启用企业微信或用户无企业微信身份时跳过 */
 export async function notifyOrder(e: OrderEvent) {
   const wecom = await readConfig('wecom')
   if (wecom.enabled === 'false' || !wecom.corpId || !wecom.secret || !wecom.agentId) return
@@ -131,23 +204,24 @@ export async function notifyOrder(e: OrderEvent) {
   if (!identity) return
   const rule = await db.rebateRule.findFirst({ where: { scopeKey: 'user:' + e.userId } })
   const basisPoints = rule?.basisPoints ?? Math.round((await settings()).ratio * 100)
-  const rebate = e.commissionCents == null ? null : Math.floor((e.commissionCents * basisPoints) / 10000)
-  const head = {
-    created: '🛒 下单成功，已记录返利',
-    paid: '💳 订单已付款',
-    completed: '✅ 订单已完成，返现进入待结算',
-    cancelled: '❌ 订单已取消，本单不产生返现',
-  }[e.kind]
-  const lines = [
-    head,
-    `商品：${e.title}`,
-    `平台：${platformName[e.platform] || e.platform}`,
-    e.amountCents != null ? `金额：${yuan(e.amountCents)}` : null,
-    e.kind !== 'cancelled' ? `预计返现：${yuan(rebate)}（以联盟结算为准）` : null,
-    e.kind === 'created' || e.kind === 'paid' ? '确认收货并通过联盟结算后，返现会进入账户余额。' : null,
-  ].filter(Boolean)
-  await send(wecom, identity.externalUserId, lines.join('\n'))
-  console.log(`[企业微信] 已通知 ${identity.externalUserId}：${head}`)
+  const rebate = e.commissionCents == null ? 0 : Math.floor((e.commissionCents * basisPoints) / 10000)
+  const total = await totalRebate(e.userId, basisPoints)
+  try {
+    await send(wecom, identity.externalUserId, orderCard(e, rebate, total))
+  } catch (err) {
+    // 模板卡片不可用（如旧版客户端 / 接口限制）时退回纯文本
+    console.warn(`[企业微信] 订单卡片发送失败，改发文本：${err instanceof Error ? err.message : err}`)
+    const lines = [
+      orderHead[e.kind],
+      `商品：${e.title}`,
+      `平台：${platformName[e.platform] || e.platform}`,
+      e.amountCents ? `金额：${yuan(e.amountCents)}` : null,
+      `本单返现：${e.kind === 'cancelled' ? '¥0.00' : yuan(rebate)}`,
+      `累计返利：${yuan(total)}`,
+    ].filter(Boolean)
+    await send(wecom, identity.externalUserId, lines.join('\n'))
+  }
+  console.log(`[企业微信] 已通知 ${identity.externalUserId}：${orderHead[e.kind]}`)
 }
 let running = false
 export async function processInbox() {
@@ -193,7 +267,7 @@ export async function processInbox() {
       }
       if (!identity) throw new Error('IDENTITY_CREATE_FAILED')
       const id = identity.userId
-      let reply: string | News = '发送商品链接查询优惠和预计返现。\n/订单 查看自己的订单\n/待结算 查看待结算订单\n/余额 查看账户金额\n/提现记录 查看提现进度\n订单同步可能延迟，返现以联盟结算为准；取消或退款可能影响返现。'
+      let reply: string | News = '发送商品链接查询优惠和预计返现。\n/订单 查看自己的订单\n/待结算 查看待结算订单\n/余额 查看账户金额\n/提现记录 查看提现进度\n订单同步可能有延迟；取消或退款会影响返现。'
       if (!identity.user.enabled) reply = '当前账户已禁用，请联系管理员。'
       else if (content.trim() === '/查返利') reply = '直接发送京东、淘宝 / 天猫商品链接或含链接的分享文案，即可查询优惠与预计返现。价格和优惠以实际下单为准。'
       else if (content.trim() === '/支持平台') reply = `当前已接入：${listPlatforms().map((p) => p.name).join('、')}。\n直接发送商品链接或分享文案即可查询优惠与返现。各平台可用性取决于实际接口权限。`
@@ -246,7 +320,7 @@ export async function processInbox() {
               `售价：${yuan(p.price)}`,
               `优惠券：${p.coupon ? yuan(p.coupon) : p.coupon === 0 ? '无' : '待确认'}`,
               p.finalPrice != null ? `预计到手：${yuan(p.finalPrice)}` : null,
-              `预计返现：${p.rebate != null ? yuan(p.rebate) : '待确认'}（以联盟结算为准）`,
+              `预计返现：${p.rebate != null ? yuan(p.rebate) : '待确认'}`,
               !known && p.infoMessage ? `商品信息未获取：${p.infoMessage}` : null,
               p.password ? `淘口令：${p.password}` : null,
               p.password ? '👉 点击卡片购买，或复制下一条消息打开手机淘宝' : '👉 点击卡片前往购买',

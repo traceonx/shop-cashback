@@ -49,5 +49,5 @@ export async function claimOrder(userId: string, orderNo: string) {
       data: { actorId: userId, action: '用户找回订单', targetId: orderNo, traceId: 'wecom', diff: { lines: verified.map((o) => o.id) } },
     }),
   ])
-  return `已找回订单：${verified.map((o) => o.items[0]?.title || '商品').join('、')}。返现以联盟结算为准，发送 /订单 可查看。`
+  return `已找回订单：${verified.map((o) => o.items[0]?.title || '商品').join('、')}，发送 /订单 可查看。`
 }
