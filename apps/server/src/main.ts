@@ -41,7 +41,7 @@ import { getMenu, saveMenu, publishMenu } from './wecom-menu'
 import { env, requireEnv } from './config'
 import { hashPassword, verifyPassword } from './security'
 import * as business from './business'
-import { startOrderSync, orderSyncStatus, processOrderSync } from './order-sync'
+import { startOrderSync, orderSyncStatus, processOrderSync, autoSyncOrders } from './order-sync'
 import { platform, listPlatforms } from './platforms/registry'
 import { integrationStatus, saveConfig, testConnection, readConfig, type Provider } from './integrations'
 import { decryptCallback, receiveCallback, processInbox } from './wecom'
@@ -528,6 +528,10 @@ async function bootstrap() {
     2000,
   )
   orderTimer.unref()
+  // 每 10 分钟自动同步一次最近订单（启动 1 分钟后开始）
+  const autoSync = () => void autoSyncOrders().catch(() => console.error('自动同步订单失败'))
+  setTimeout(autoSync, 60000).unref()
+  setInterval(autoSync, 600000).unref()
   app.enableShutdownHooks()
 }
 void bootstrap().catch(() => {

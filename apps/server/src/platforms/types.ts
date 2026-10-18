@@ -30,6 +30,8 @@ export interface PlatformPlugin {
   orderStatus(rawStatus: string): PlatformOrderStatus
   configured(config: PlatformConfig): boolean
   normalizeUrl(content: string): string
+  /** 是否已接入订单同步（未接入的平台不参与自动同步） */
+  orderSync?: boolean
   convert(
     config: PlatformConfig,
     url: string,

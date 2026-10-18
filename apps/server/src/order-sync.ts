@@ -1,7 +1,8 @@
 import { BadRequestException } from '@nestjs/common'
 import { db, json } from './database'
 import { readConfig } from './integrations'
-import { platform } from './platforms/registry'
+import { platform, listPlatforms } from './platforms/registry'
+import { notifyOrder, type OrderEvent } from './wecom'
 
 type Cursor = {
   engine: 'platform-v1'
@@ -15,7 +16,12 @@ type Cursor = {
   total: number
   type: 1 | 3
 }
-export async function startOrderSync(actor: string, trace: string, body: { platform?: string; hours?: number } = {}) {
+export async function startOrderSync(
+  actor: string,
+  trace: string,
+  body: { platform?: string; hours?: number } = {},
+  options: { auto?: boolean } = {},
+) {
   const plugin = platform(body.platform || 'jd'),
     hours = body.hours ?? 24
   if (!Number.isInteger(hours) || hours < 1 || hours > plugin.maxHistoryDays * 24)
@@ -48,7 +54,7 @@ export async function startOrderSync(actor: string, trace: string, body: { platf
     const job = await tx.syncJob.create({
       data: { accountId: plugin.accountId, cursor: json(cursor), status: 'QUEUED' },
     })
-    await tx.auditLog.create({
+    if (!options.auto) await tx.auditLog.create({
       data: {
         actorId: actor,
         action: '开始同步订单',
@@ -118,6 +124,7 @@ export async function processOrderSync() {
       const done = !page.hasMore && until.getTime() >= new Date(c.until).getTime()
       if (page.rows.length) console.log(`[订单同步] ${c.platform} ${from.toISOString()} 第 ${c.page} 页导入 ${page.rows.length} 条`)
       if (done) console.log(`[订单同步] ${c.platform} 同步完成，共 ${next.count} 条`)
+      const events: OrderEvent[] = []
       await db.$transaction(
         async (tx) => {
           const held = await tx.syncJob.updateMany({
@@ -156,7 +163,7 @@ export async function processOrderSync() {
                   externalLineId: row.lineId,
                 },
               },
-              select: { userId: true },
+              select: { userId: true, status: true },
             })
             if (owner && existing?.userId && owner !== existing.userId)
               throw new BadRequestException('订单用户标识冲突，已停止同步，请人工核对')
@@ -173,6 +180,23 @@ export async function processOrderSync() {
               rawData: json(row.raw),
               commissionCents: row.commissionCents === null ? null : BigInt(row.commissionCents),
               completedAt: row.completedAt,
+            }
+            // 状态有变化（新订单或状态更新）时通知下单用户；只通知近期订单，避免同步历史时刷屏
+            const notifyUser = owner || existing?.userId
+            const recent = Date.now() - row.placedAt.getTime() < (existing ? 30 : 2) * 86400000
+            if (notifyUser && recent && existing?.status !== row.status) {
+              const kind = ({ CREATED: 'created', PAID: existing ? 'paid' : 'created', COMPLETED: 'completed', CANCELLED: 'cancelled' } as const)[
+                row.status as 'CREATED' | 'PAID' | 'COMPLETED' | 'CANCELLED'
+              ]
+              if (kind)
+                events.push({
+                  userId: notifyUser,
+                  kind,
+                  platform: plugin.id,
+                  title: row.title,
+                  amountCents: row.commissionBaseCents,
+                  commissionCents: row.commissionCents,
+                })
             }
             await tx.affiliateOrder.upsert({
               where: { platform_accountId_externalOrderId_externalLineId: key },
@@ -203,6 +227,8 @@ export async function processOrderSync() {
         },
         { timeout: 30000 },
       )
+      // 事务提交后再发通知，发送失败不影响同步
+      for (const e of events) await notifyOrder(e).catch((err) => console.warn(`[企业微信] 订单通知发送失败：${err instanceof Error ? err.message : err}`))
     } catch (e) {
       console.warn(`[订单同步] 失败：${e instanceof Error ? e.message : e}`)
       await db.syncJob.updateMany({
@@ -212,5 +238,17 @@ export async function processOrderSync() {
     }
   } finally {
     working = false
+  }
+}
+
+/** 定时自动同步：每个已配置的联盟拉取最近 1 小时内有更新的订单（按更新时间），以便及时通知用户 */
+export async function autoSyncOrders() {
+  for (const plugin of listPlatforms()) {
+    try {
+      if (plugin.orderSync === false || !plugin.configured(await readConfig(plugin.id))) continue
+      await startOrderSync('system', 'auto-sync', { platform: plugin.id, hours: 1 }, { auto: true })
+    } catch (e) {
+      console.warn(`[订单同步] ${plugin.name} 自动同步未启动：${e instanceof Error ? e.message : e}`)
+    }
   }
 }

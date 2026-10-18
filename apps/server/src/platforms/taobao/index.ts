@@ -228,6 +228,7 @@ export const taobaoPlugin: PlatformPlugin = {
   maxWindowMs: 3 * 3600000,
   configured: (c) => !!(c.appKey && c.appSecret && c.pid && c.adzoneId),
   normalizeUrl: extractTaobaoUrl,
+  orderSync: false,
   orderStatus: (code) => tkStatus[code] || 'UNATTRIBUTED',
   orderAmounts: () => ({ amount: null, commission: null, commissionBase: null }),
   orderImage: () => null,

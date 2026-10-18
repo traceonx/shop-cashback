@@ -3,7 +3,7 @@ import { XMLParser } from 'fast-xml-parser'
 import { BadRequestException, UnauthorizedException } from '@nestjs/common'
 import { db, dateText } from './database'
 import { readConfig, wecomToken, wecomUrl, wecomError, type Config } from './integrations'
-import { convert } from './business'
+import { convert, settings } from './business'
 import { menuCommand } from './wecom-menu'
 import { listPlatforms } from './platforms/registry'
 export function decryptCallback(c: Config, signature: string, timestamp: string, nonce: string, encrypted: string) {
@@ -112,6 +112,42 @@ async function send(c: Config, user: string, content: string | News) {
     throw new Error(data.invaliduser ? `接收人无效：${data.invaliduser}` : wecomError('消息发送失败', data))
 }
 const yuan = (cents: number | null | undefined) => (cents == null ? '待确认' : `¥${(cents / 100).toFixed(2)}`)
+
+export type OrderEvent = {
+  userId: string
+  kind: 'created' | 'paid' | 'completed' | 'cancelled'
+  platform: string
+  title: string
+  amountCents: number | null
+  commissionCents: number | null
+}
+const platformName: Record<string, string> = { jd: '京东', taobao: '淘宝' }
+/** 订单状态变化时通知下单用户（企业微信应用消息）；未启用企业微信或用户无企业微信身份时跳过 */
+export async function notifyOrder(e: OrderEvent) {
+  const wecom = await readConfig('wecom')
+  if (wecom.enabled === 'false' || !wecom.corpId || !wecom.secret || !wecom.agentId) return
+  const identity = await db.userIdentity.findFirst({ where: { userId: e.userId, channelId: 'wecom-primary' } })
+  if (!identity) return
+  const rule = await db.rebateRule.findFirst({ where: { scopeKey: 'user:' + e.userId } })
+  const basisPoints = rule?.basisPoints ?? Math.round((await settings()).ratio * 100)
+  const rebate = e.commissionCents == null ? null : Math.floor((e.commissionCents * basisPoints) / 10000)
+  const head = {
+    created: '🛒 下单成功，已记录返利',
+    paid: '💳 订单已付款',
+    completed: '✅ 订单已完成，返现进入待结算',
+    cancelled: '❌ 订单已取消，本单不产生返现',
+  }[e.kind]
+  const lines = [
+    head,
+    `商品：${e.title}`,
+    `平台：${platformName[e.platform] || e.platform}`,
+    e.amountCents != null ? `金额：${yuan(e.amountCents)}` : null,
+    e.kind !== 'cancelled' ? `预计返现：${yuan(rebate)}（以联盟结算为准）` : null,
+    e.kind === 'created' || e.kind === 'paid' ? '确认收货并通过联盟结算后，返现会进入账户余额。' : null,
+  ].filter(Boolean)
+  await send(wecom, identity.externalUserId, lines.join('\n'))
+  console.log(`[企业微信] 已通知 ${identity.externalUserId}：${head}`)
+}
 let running = false
 export async function processInbox() {
   if (running) return
