@@ -5,6 +5,10 @@
 
 规则：修复 / 小调整升 patch（0.3.0 → 0.3.1）；新功能或部署方式变化升 minor（0.3.x → 0.4.0）。
 
+## 0.7.1 · 2026-10-18
+
+- 修复单元测试：淘宝插件已注册，更新“未注册平台”断言（改用拼多多）。
+
 ## 0.7.0 · 2026-10-18
 
 - 接入淘宝联盟（推广者）：TOP 网关 MD5 签名；识别淘宝 / 天猫商品链接与含 m.tb.cn 的分享文案；商品详情（taobao.tbk.item.info.upgrade.get）、按商品 ID 万能转链（taobao.tbk.dg.general.link.convert）、淘口令（taobao.tbk.tpwd.create）。

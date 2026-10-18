@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { jdPlugin, orderRows, jdOrderStatus, jdOrderAmounts, resolveJdSku } from './platforms/jd'
 import { platform, platformForContent } from './platforms/registry'
+import { taobaoPlugin } from './platforms/taobao'
 
 test('商品查询兼容官方包装结构，空券信息仍可返回价格和佣金', async () => {
   const original = globalThis.fetch
@@ -67,7 +68,8 @@ test('京东交易状态与返现归属分开，取消单不得显示待归属',
 
 test('插件注册只暴露已实现的平台；链接不能绕过平台白名单', () => {
   assert.equal(platform('jd'), jdPlugin)
-  assert.throws(() => platform('taobao'))
+  assert.equal(platform('taobao'), taobaoPlugin)
+  assert.throws(() => platform('pdd'))
   assert.throws(() => platformForContent('https://item.jd.com.evil.test/1.html'))
   assert.equal(platformForContent('https://item.jd.com/123.html').plugin.id, 'jd')
   assert.equal(jdPlugin.configured({ appKey: 'test', appSecret: 'test' }), true)
