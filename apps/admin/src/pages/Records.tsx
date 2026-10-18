@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
-import { Banknote, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, Download, Link2, RefreshCw, RotateCcw, Search } from 'lucide-react'
-import { api, saveBlob, type Row } from '../lib/api'
+import { Banknote, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, RefreshCw, Search, X } from 'lucide-react'
+import { api, type Row } from '../lib/api'
 import { amount, errorText, money, type Notify } from '../lib/format'
 import { statusLabel } from '../lib/labels'
-import { Alert, Avatar, Button, Card, CardBody, CardHeader, EmptyState, IconButton, Loading, Modal, Pagination, PlatformTag, confirm, Select, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
-import { Conversion, ConversionCard } from './Conversion'
+import { Alert, Avatar, Button, Card, CardBody, EmptyState, IconButton, Loading, Modal, Pagination, PlatformTag, confirm, Select, SplitButton, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
+import { ConversionCard } from './Conversion'
 import { ProductCell } from './shared'
 
 export type RecordKind = 'orders' | 'users' | 'rebates' | 'withdrawals' | 'promotions'
@@ -101,10 +100,34 @@ function cell(kind: RecordKind, key: string, r: Row) {
   return <span className={monoKeys.includes(key) ? 'text-mono' : key.endsWith('At') ? 'nowrap text-muted' : undefined}>{String(v)}</span>
 }
 
-type SyncState = { id: string; status: string; count: number; windows: number; total: number; error: string | null } | null
+type SyncState = {
+  id: string
+  status: string
+  count: number
+  windows: number
+  total: number
+  error: string | null
+  auto?: boolean
+  lastSyncedAt?: string | null
+} | null
+
+const syncRanges: [string, string][] = [
+  ['1', '最近 1 小时'],
+  ['24', '最近 24 小时'],
+  ['168', '最近 7 天'],
+  ['720', '最近 30 天'],
+  ['2160', '最近 90 天'],
+]
+
+/** 距今多久：12 秒前 / 5 分钟前 / 2 小时前 */
+function ago(at?: string | null) {
+  if (!at) return ''
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(at)) / 1000))
+  return s < 60 ? `${s} 秒前` : s < 3600 ? `${Math.floor(s / 60)} 分钟前` : `${Math.floor(s / 3600)} 小时前`
+}
 
 export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) {
-  const { title, columns: allColumns } = config[kind]
+  const { columns: allColumns } = config[kind]
   const columns = allColumns.filter((c) => !c[2])
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
@@ -114,8 +137,6 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
   const [date, setDate] = useState('')
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Row | null>(null)
-  const [converting, setConverting] = useState(new URLSearchParams(useLocation().search).has('test'))
-  const [syncHours, setSyncHours] = useState('1')
   const [sync, setSync] = useState<SyncState>(null)
   const [syncing, setSyncing] = useState(false)
 
@@ -177,10 +198,10 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
   const current = Math.min(page, pages)
   const statuses = Array.from(new Set(rows.map((r) => String(r.status)).filter((s) => s && s !== 'undefined')))
 
-  async function startSync() {
+  async function startSync(hours = '1') {
     setSyncing(true)
     try {
-      const r = await api<{ message: string }>('/orders/sync', { method: 'POST', body: JSON.stringify({ platform: 'jd', hours: Number(syncHours) }) })
+      const r = await api<{ message: string }>('/orders/sync', { method: 'POST', body: JSON.stringify({ platform: 'jd', hours: Number(hours) }) })
       setSync(await api<SyncState>('/orders/sync-status'))
       notify(r.message)
     } catch (e) {
@@ -189,12 +210,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
       setSyncing(false)
     }
   }
-  function exportCsv() {
-    const esc = (s: unknown) => `"${String(s ?? '').replace(/^[=+@-]/, "'$&").replaceAll('"', '""')}"`
-    const csv = '﻿' + [allColumns.map((c) => c[1]).join(','), ...filtered.map((r) => allColumns.map(([k]) => esc(r[k])).join(','))].join('\r\n')
-    saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `${title}.csv`)
-    notify('已导出当前筛选结果（金额单位：分）')
-  }
+  const filtering = !!(query || status || date)
   const reset = () => {
     setQuery('')
     setStatus('')
@@ -211,7 +227,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
           <StatCard icon={CircleCheck} tone="success" label="已完成提现" value={sum('COMPLETED')} />
         </div>
       )}
-      {kind === 'orders' && sync?.status && sync.status !== 'COMPLETED' && (
+      {kind === 'orders' && sync?.status && (sync.status === 'FAILED' || (!sync.auto && sync.status !== 'COMPLETED')) && (
         <Alert tone={sync.status === 'FAILED' ? 'error' : 'info'}>
           {sync.status === 'FAILED' ? '同步失败' : '后台同步中'} · 已处理 {sync.windows}/{sync.total} 个时段 · {sync.count} 条订单
           {sync.error && ` · ${sync.error}`}
@@ -219,56 +235,26 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
       )}
 
       <Card>
-        <CardHeader
-          title={title}
-          subtitle={
-            kind === 'orders'
-              ? '未关联用户的订单不会发放返现'
-              : kind === 'withdrawals'
-                ? '审核通过后需人工打款，再填写凭证完成'
-                : undefined
-          }
-          actions={
-            <>
-              {kind === 'orders' && (
-                <>
-                  <Select
-                    dense
-                    aria-label="同步范围"
-                    value={syncHours}
-                    onChange={setSyncHours}
-                    options={[
-                      ['1', '最近更新（1 小时）'],
-                      ['24', '最近 1 天'],
-                      ['168', '最近 7 天'],
-                      ['720', '最近 30 天'],
-                      ['2160', '最近 90 天'],
-                    ]}
-                  />
-                  <Button variant="tonal" icon={RefreshCw} loading={syncing} onClick={startSync}>
-                    同步订单
-                  </Button>
-                </>
-              )}
-              {(kind === 'orders' || kind === 'promotions') && (
-                <Button variant="primary" icon={Link2} onClick={() => setConverting(true)}>
-                  转链测试
-                </Button>
-              )}
-              <Button variant="outlined" icon={Download} onClick={exportCsv}>
-                导出
-              </Button>
-            </>
-          }
-        />
         <div className="toolbar">
           <TextField dense icon={Search} placeholder="搜索商品、用户或编号" aria-label="搜索" value={query} onChange={(e) => setQuery(e.target.value)} className="toolbar-search" />
           {kind !== 'rebates' && (
             <Select dense aria-label="状态" value={status} onChange={setStatus} options={[['', '全部状态'], ...statuses.map((s): [string, string] => [s, statusLabel(s)])]} />
           )}
           <DatePicker dense aria-label="日期" value={date} onChange={setDate} />
-          <IconButton icon={RotateCcw} label="重置筛选" onClick={reset} />
-          <IconButton icon={RefreshCw} label="刷新" spinning={loading} onClick={load} />
+          {filtering && <IconButton icon={X} label="清除筛选" onClick={reset} />}
+          {kind === 'orders' && (
+            <>
+              {sync?.lastSyncedAt && (
+                <span className="sync-hint" title="系统会根据转链活跃度自动同步订单">
+                  <CircleCheck size={14} />
+                  {ago(sync.lastSyncedAt)}同步
+                </span>
+              )}
+              <SplitButton icon={RefreshCw} loading={syncing} onClick={() => void startSync()} options={syncRanges} onSelect={(h) => void startSync(h)} menuLabel="选择同步范围">
+                同步订单
+              </SplitButton>
+            </>
+          )}
         </div>
         {error && (
           <div className="toolbar">
@@ -330,15 +316,6 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
         </CardBody>
       </Card>
 
-      {converting && (
-        <Conversion
-          notify={notify}
-          onClose={() => {
-            setConverting(false)
-            void load()
-          }}
-        />
-      )}
       {selected && (
         <RecordDetail
           kind={kind}

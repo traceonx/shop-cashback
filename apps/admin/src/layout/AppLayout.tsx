@@ -8,6 +8,7 @@ import {
   ChevronRight,
   FileText,
   LayoutDashboard,
+  Link2,
   LogOut,
   Menu,
   Monitor,
@@ -22,11 +23,12 @@ import {
 } from 'lucide-react'
 import { auth } from '../lib/api'
 import { useTheme, type ThemeMode } from '../lib/theme'
-import { cx } from '../lib/format'
+import { cx, type Notify } from '../lib/format'
 import { displayName, roleName, useProfile } from '../lib/profile'
 import { IconButton } from '../ui'
 import { UserAvatar } from './UserAvatar'
 import { LogViewer } from '../pages/LogViewer'
+import { Conversion } from '../pages/Conversion'
 
 type NavItem = { path: string; label: string; icon: LucideIcon }
 export const navigation: { title?: string; items: NavItem[] }[] = [
@@ -57,10 +59,11 @@ const themes: { value: ThemeMode; label: string; icon: LucideIcon }[] = [
 ]
 
 /** 后台布局：左侧导航（≤1200px 变为抽屉）+ 固定顶栏 + 独立滚动的内容区 */
-export function AppLayout({ onLogout, children }: { onLogout: () => void; children: ReactNode }) {
+export function AppLayout({ onLogout, notify, children }: { onLogout: () => void; notify: Notify; children: ReactNode }) {
   const location = useLocation()
   const [drawer, setDrawer] = useState(false)
   const [logs, setLogs] = useState(false)
+  const [converting, setConverting] = useState(false)
 
   useEffect(() => setDrawer(false), [location.pathname])
 
@@ -96,7 +99,7 @@ export function AppLayout({ onLogout, children }: { onLogout: () => void; childr
           <span className="spacer" />
           <div className="navbar-actions">
             <IconButton icon={FileText} label="实时日志" onClick={() => setLogs(true)} />
-            <AccountMenu onLogout={onLogout} />
+            <AccountMenu onLogout={onLogout} onConvert={() => setConverting(true)} />
           </div>
         </header>
         <main className="page" key={location.pathname}>
@@ -104,12 +107,13 @@ export function AppLayout({ onLogout, children }: { onLogout: () => void; childr
         </main>
       </div>
       {logs && <LogViewer onClose={() => setLogs(false)} />}
+      {converting && <Conversion notify={notify} onClose={() => setConverting(false)} />}
     </div>
   )
 }
 
-/** 头像菜单：个人信息、主题、退出登录 */
-function AccountMenu({ onLogout }: { onLogout: () => void }) {
+/** 头像菜单：个人信息、转链测试、主题、退出登录 */
+function AccountMenu({ onLogout, onConvert }: { onLogout: () => void; onConvert: () => void }) {
   const navigate = useNavigate()
   const profile = useProfile()
   const { mode, setMode } = useTheme()
@@ -155,6 +159,18 @@ function AccountMenu({ onLogout }: { onLogout: () => void }) {
           >
             <UserRound size={20} />
             个人信息
+          </button>
+          <button
+            type="button"
+            className="menu-item"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              onConvert()
+            }}
+          >
+            <Link2 size={20} />
+            转链测试
           </button>
           <button type="button" className="menu-item" role="menuitem" aria-expanded={themeOpen} onClick={() => setThemeOpen(!themeOpen)}>
             <current.icon size={20} />

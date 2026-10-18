@@ -1,4 +1,5 @@
 export { Button, IconButton } from './Button'
+export { SplitButton } from './SplitButton'
 export { Card, CardHeader, CardBody, Avatar, StatCard, type Tone } from './Card'
 export { Modal } from './Modal'
 export { ConfirmDialog } from './ConfirmDialog'

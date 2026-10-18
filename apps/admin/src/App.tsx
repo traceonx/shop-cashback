@@ -36,7 +36,7 @@ export function App() {
   else if (location.pathname === '/logs') content = <LogViewer standalone />
   else
     content = (
-      <AppLayout onLogout={() => setSigned(false)}>
+      <AppLayout onLogout={() => setSigned(false)} notify={notify}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           {(['orders', 'users', 'rebates', 'withdrawals', 'promotions'] as const).map((kind) => (

@@ -88,7 +88,23 @@
 .toolbar-search {
   flex: 1;
   min-width: 220px !important;
-  max-width: 360px;
+}
+.sync-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 4px;
+  color: var(--c-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.sync-hint svg {
+  color: var(--c-success);
+}
+@media (max-width: 960px) {
+  .sync-hint {
+    display: none;
+  }
 }
 .stat-grid-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));

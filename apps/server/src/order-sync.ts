@@ -77,7 +77,14 @@ export async function orderSyncStatus() {
   })
   if (!job) return null
   const c = job.cursor as unknown as Cursor
+  const last = await db.syncJob.findFirst({
+    where: { status: 'COMPLETED', cursor: { path: ['engine'], equals: 'platform-v1' } },
+    orderBy: { finishedAt: 'desc' },
+    select: { finishedAt: true },
+  })
   return {
+    auto: !!c.auto,
+    lastSyncedAt: last?.finishedAt ?? null,
     id: job.id,
     status: job.status,
     platform: c.platform,

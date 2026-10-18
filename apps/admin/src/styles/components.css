@@ -1035,3 +1035,27 @@
   background: rgba(var(--secondary-rgb), 0.14);
   color: var(--c-secondary);
 }
+
+/* 分体按钮 */
+.split-btn {
+  display: inline-flex;
+  flex: none;
+}
+.split-btn > .btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.split-btn > .split-btn-toggle {
+  padding: 0 9px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgb(255 255 255 / 0.28);
+}
+button.select-option {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
