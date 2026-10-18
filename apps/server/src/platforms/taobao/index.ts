@@ -236,11 +236,12 @@ export const taobaoPlugin: PlatformPlugin = {
       if (!info?.title) throw new BadRequestException(`暂时无法转换这条链接${why()}。请在淘宝 App 点「分享」→「复制链接」，把完整分享文案（含「商品标题」）发过来再试`)
       let found: ReturnType<typeof parseMaterialSearch> = null
       try {
-        found = parseMaterialSearch(
-          await topRequest(c, 'taobao.tbk.dg.material.optional.upgrade', { adzone_id: c.adzoneId, q: info.title.slice(0, 60), page_size: 20 }),
-          info.itemId || itemId,
-          info.title,
-        )
+        // 按标题搜索，最多翻 3 页（每页 100 条）找到同一商品
+        for (let page = 1; page <= 3 && !found; page++) {
+          const resp = await topRequest(c, 'taobao.tbk.dg.material.optional.upgrade', { adzone_id: c.adzoneId, q: info.title.slice(0, 60), page_no: page, page_size: 100 })
+          found = parseMaterialSearch(resp, info.itemId || itemId, info.title)
+          if (list(resp?.result_list, 'map_data').length < 100) break
+        }
       } catch (err) {
         throw new BadRequestException(`商品${label}转链失败（物料搜索）：${(err as Error).message}`)
       }
