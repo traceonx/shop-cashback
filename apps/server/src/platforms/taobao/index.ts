@@ -154,26 +154,50 @@ export function parseItemDetail(resp: any) {
     commission: decimalCents(income.commission_amount),
   }
 }
-// 物料搜索（taobao.tbk.dg.material.optional.upgrade，权限包「物料搜索」）：结果自带含推广位的推广链接
-export function parseMaterialSearch(resp: any, itemId: string | null, title: string) {
-  const rows = list(resp?.result_list, 'map_data')
+// 物料搜索（taobao.tbk.dg.material.optional.upgrade，权限包「物料搜索」）：结果自带含推广位的推广链接。
+// 同款商品常有多家店铺用相同标题在卖，为避免把 A 店换成 B 店：商品 ID 命中最可靠；
+// 标题完全一致时必须只属于一家店铺；标题包含关系只在唯一候选时采用；否则视为无法确定，不转链。
+export type MaterialMatch =
+  | { status: 'ok'; url: string | null; coupon: number | null; commission: number | null; finalPrice: number | null; price: number | null; shop: string | null; image: string | null; title: string; by: 'id' | 'title' | 'fuzzy' }
+  | { status: 'ambiguous'; shops: string[] }
+  | { status: 'none' }
+export function parseMaterialSearch(rows: any[], itemId: string | null, title: string): MaterialMatch {
   const norm = (t: unknown) => String(t || '').replace(/\s+/g, '')
-  const hit =
-    (itemId && rows.find((r) => String(r.item_id) === itemId || String(r.item_id).endsWith('-' + itemId))) ||
-    rows.find((r) => norm(r.item_basic_info?.title) === norm(title)) ||
-    // 分享文案中的标题可能被截断或略有出入：最后按标题包含关系匹配
-    (rows.find((r) => { const t = norm(r.item_basic_info?.title); const q = norm(title); return q.length >= 8 && (t.includes(q) || q.includes(t)) })) ||
-    null
-  if (!hit) return null
-  const pub = hit.publish_info || {}, price = hit.price_promotion_info || {}
-  const paths = list(price.final_promotion_path_list, 'final_promotion_path_map_data')
-  const coupon = paths.filter((p) => /券/.test(String(p.promotion_title || ''))).reduce((sum, p) => sum + (decimalCents(p.promotion_fee) || 0), 0)
-  return {
-    url: https(pub.coupon_share_url || pub.click_url),
-    coupon: paths.length ? coupon : null,
-    commission: decimalCents(pub.income_info?.commission_amount),
-    finalPrice: decimalCents(price.final_promotion_price),
+  const seller = (r: any) => String(r.item_basic_info?.seller_id || r.item_basic_info?.shop_title || r.item_id)
+  const shopName = (r: any) => String(r.item_basic_info?.shop_title || '未知店铺')
+  const pick = (hit: any, by: 'id' | 'title' | 'fuzzy'): MaterialMatch => {
+    const basic = hit.item_basic_info || {}, pub = hit.publish_info || {}, price = hit.price_promotion_info || {}
+    const paths = list(price.final_promotion_path_list, 'final_promotion_path_map_data')
+    const coupon = paths.filter((p) => /券/.test(String(p.promotion_title || ''))).reduce((sum, p) => sum + (decimalCents(p.promotion_fee) || 0), 0)
+    return {
+      status: 'ok',
+      url: https(pub.coupon_share_url || pub.click_url),
+      coupon: paths.length ? coupon : null,
+      commission: decimalCents(pub.income_info?.commission_amount),
+      finalPrice: decimalCents(price.final_promotion_price),
+      price: decimalCents(price.zk_final_price ?? price.reserve_price),
+      shop: basic.shop_title ? String(basic.shop_title) : null,
+      image: https(basic.pict_url),
+      title: String(basic.title || title),
+      by,
+    }
   }
+  const byId = itemId && rows.find((r) => String(r.item_id) === itemId || String(r.item_id).endsWith('-' + itemId))
+  if (byId) return pick(byId, 'id')
+  const decide = (cands: any[], by: 'title' | 'fuzzy'): MaterialMatch | null => {
+    if (!cands.length) return null
+    const sellers = new Map<string, any>()
+    for (const r of cands) if (!sellers.has(seller(r))) sellers.set(seller(r), r)
+    if (sellers.size > 1) return { status: 'ambiguous', shops: [...sellers.values()].map(shopName) }
+    if (by === 'fuzzy' && cands.length > 1) return { status: 'ambiguous', shops: [shopName(cands[0])] }
+    return pick(cands[0], by)
+  }
+  const q = norm(title)
+  return (
+    decide(rows.filter((r) => norm(r.item_basic_info?.title) === q), 'title') ||
+    decide(q.length >= 8 ? rows.filter((r) => { const t = norm(r.item_basic_info?.title); return t.length >= 8 && (t.includes(q) || q.includes(t)) }) : [], 'fuzzy') ||
+    { status: 'none' }
+  )
 }
 export function parseConvert(resp: any) {
   const row = list(resp?.data?.item_url_list, 'item_url_list')[0] || list(resp?.data, 'item_url_list')[0]
@@ -226,6 +250,7 @@ export const taobaoPlugin: PlatformPlugin = {
     if (!info && sharedTitle) info = { itemId, title: sharedTitle, image: null, price: null, finalPrice: null, coupon: null, commission: null }
     const why = () => (notices.length ? `（${notices.join('；')}）` : '')
     let converted: ReturnType<typeof parseConvert> = null
+    let shop: string | null = null
     const label = info?.title ? `「${info.title}」` : ''
     try {
       if (!itemId) throw new TopError('11', '', '无商品 ID，跳过万能转链')
@@ -234,20 +259,34 @@ export const taobaoPlugin: PlatformPlugin = {
       if (!(e instanceof TopError && e.code === '11')) throw new BadRequestException(`商品${label}转链失败：${(e as Error).message}`)
       // 万能转链为邀约权限；无权限时用「物料搜索」按标题搜索并按商品 ID 匹配，结果中的推广链接已带推广位
       if (!info?.title) throw new BadRequestException(`暂时无法转换这条链接${why()}。请在淘宝 App 点「分享」→「复制链接」，把完整分享文案（含「商品标题」）发过来再试`)
-      let found: ReturnType<typeof parseMaterialSearch> = null
+      let found: MaterialMatch = { status: 'none' }
       try {
-        // 按标题搜索，最多翻 3 页（每页 100 条）找到同一商品
-        for (let page = 1; page <= 3 && !found; page++) {
+        // 按标题搜索，最多翻 3 页（每页 100 条），汇总后再判断是否能唯一确定同一商品
+        const rows: any[] = []
+        for (let page = 1; page <= 3; page++) {
           const resp = await topRequest(c, 'taobao.tbk.dg.material.optional.upgrade', { adzone_id: c.adzoneId, q: info.title.slice(0, 60), page_no: page, page_size: 100 })
-          found = parseMaterialSearch(resp, info.itemId || itemId, info.title)
-          if (list(resp?.result_list, 'map_data').length < 100) break
+          const batch = list(resp?.result_list, 'map_data')
+          rows.push(...batch)
+          if (batch.length < 100) break
         }
+        found = parseMaterialSearch(rows, info.itemId || itemId, info.title)
       } catch (err) {
         throw new BadRequestException(`商品${label}转链失败（物料搜索）：${(err as Error).message}`)
       }
-      if (!found?.url) throw new BadRequestException(`商品${label}暂无法转链：物料搜索未找到该商品${why()}`)
+      if (found.status === 'ambiguous') {
+        const shops = [...new Set(found.shops)]
+        throw new BadRequestException(
+          shops.length > 1
+            ? `商品${label}有 ${shops.length} 家店铺在卖同名商品（${shops.slice(0, 3).join('、')}${shops.length > 3 ? ' 等' : ''}），无法确定你看到的是哪一家。为避免换成别家店铺的商品，本次不转链`
+            : `商品${label}按标题匹配到多个相近商品，无法确定是哪一个，为避免转错本次不转链`,
+        )
+      }
+      if (found.status !== 'ok' || !found.url) throw new BadRequestException(`商品${label}暂无法转链：物料搜索未找到该商品${why()}`)
       converted = { error: null, url: found.url, password: null, coupon: found.coupon, commission: found.commission }
       if (found.finalPrice != null && info.finalPrice == null) info.finalPrice = found.finalPrice
+      if (info.price == null) info.price = found.price
+      if (!info.image) info.image = found.image
+      shop = found.shop
       notices.push('已通过物料搜索转链')
     }
     if (!converted?.url) throw new BadRequestException(`转链未返回推广链接${converted?.error ? `：${converted.error}` : ''}`)
@@ -271,6 +310,7 @@ export const taobaoPlugin: PlatformPlugin = {
         payablePrice: info?.finalPrice ?? null,
         password: password || undefined,
         infoMessage: notices.join('；'),
+        shop: shop || undefined,
         rebate: null,
         finalPrice: null,
         category: '淘宝商品',

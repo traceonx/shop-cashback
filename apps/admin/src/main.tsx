@@ -1551,6 +1551,7 @@ function ChatCard({ result }: { result: Row }) {
       )}
       <ProductIcon large imageUrl={typeof result.imageUrl === 'string' ? result.imageUrl : undefined} />
       <h3>{String(result.product)}</h3>
+      {typeof result.shop === 'string' && result.shop && <p className="muted">店铺：{result.shop}（下单前请核对是否为你看到的店铺）</p>}
       <div className="chat-prices">
         <div>
           <span>商品售价</span>

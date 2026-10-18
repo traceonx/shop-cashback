@@ -203,6 +203,7 @@ export async function processInbox() {
           reply = {
             title: known ? p.product : `${p.category || '商品'} · 转链成功`,
             description: [
+              p.shop ? `店铺：${p.shop}（下单前请核对是否为你看到的店铺）` : null,
               `售价：${yuan(p.price)}`,
               `优惠券：${p.coupon ? yuan(p.coupon) : p.coupon === 0 ? '无' : '待确认'}`,
               p.finalPrice != null ? `预计到手：${yuan(p.finalPrice)}` : null,

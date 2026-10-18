@@ -47,6 +47,8 @@ export interface PlatformPlugin {
       payablePrice?: number | null
       password?: string
       infoMessage?: string
+      /** 店铺名（按标题搜索转链时返回，便于用户核对是否同一家店） */
+      shop?: string
       rebate: number | null
       finalPrice: number | null
       category: string

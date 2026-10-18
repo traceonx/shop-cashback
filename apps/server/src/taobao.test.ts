@@ -165,3 +165,22 @@ test('数字商品 ID 被拒（-4003）且无标题时，提示发送完整分�
     globalThis.fetch = original
   }
 })
+
+test('同名商品多家店铺在卖时不转链，避免换成别家店铺', async () => {
+  const { parseMaterialSearch } = await import('./platforms/taobao')
+  const row = (id: string, title: string, seller: string, shop: string) => ({ item_id: id, item_basic_info: { title, seller_id: seller, shop_title: shop }, publish_info: { click_url: '//s.click.taobao.com/' + id } })
+  // 商品 ID 命中：即使有同名商品也直接采用
+  const byId = parseMaterialSearch([row('A-1', '同款', '1', 'A店'), row('B-1', '同款', '2', 'B店')], 'B-1', '同款')
+  assert.equal(byId.status, 'ok')
+  assert.equal(byId.status === 'ok' && byId.shop, 'B店')
+  // 标题完全一致但属于两家店：无法确定
+  const amb = parseMaterialSearch([row('A-1', '小果泥唇霜 果汁唇釉', '1', 'A店'), row('B-1', '小果泥唇霜果汁唇釉', '2', 'B店')], '778899', '小果泥唇霜果汁唇釉')
+  assert.deepEqual(amb, { status: 'ambiguous', shops: ['A店', 'B店'] })
+  // 同一家店的多个同名链接：采用，并返回店铺名
+  const one = parseMaterialSearch([row('A-1', '小果泥唇霜果汁唇釉', '1', 'A店'), row('A-2', '小果泥唇霜果汁唇釉', '1', 'A店'), row('C-1', '别的东西', '3', 'C店')], null, '小果泥唇霜果汁唇釉')
+  assert.equal(one.status === 'ok' && one.shop, 'A店')
+  // 模糊匹配有多个候选：不采用
+  const fuzzy = parseMaterialSearch([row('A-1', '小果泥唇霜果汁唇釉礼盒装', '1', 'A店'), row('B-1', '小果泥唇霜果汁唇釉旗舰款', '2', 'B店')], null, '小果泥唇霜果汁唇釉')
+  assert.equal(fuzzy.status, 'ambiguous')
+  assert.deepEqual(parseMaterialSearch([], null, '小果泥唇霜果汁唇釉'), { status: 'none' })
+})
