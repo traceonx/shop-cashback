@@ -11,4 +11,4 @@
 - 风格参照 MoviePilot，整体保持精简：颜色、圆角、阴影只用 `styles/tokens.css` 里的变量，不写死颜色；页面不写内联样式。
 - 弹窗一律用 `ui/Modal`（头部、底部固定，内容滚动，`dismissible` 控制保存中禁止关闭），表单输入用 `TextField / TextArea / Select / DatePicker`，确认操作用 `await confirm({ title, content })`（`ui/confirm.tsx`，不用原生 select、date、alert、confirm），按钮用 `Button`（primary / tonal / outlined / text / danger）。
 - 新页面先复用 Card + CardHeader（标题、副标题、右侧操作）+ CardBody，页面特有样式才写进 `styles/pages.css`。
-
+- 改动后台任务（如订单同步）的执行节奏时，同步检查 `scripts/smoke.mjs` 里对调用次数、时段数的断言。

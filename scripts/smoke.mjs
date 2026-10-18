@@ -231,9 +231,9 @@ try {
       startOrderSync('test', 'test', { hours: 2 }),
     ])
     assert.equal(jobs[0].id, jobs[1].id)
+    // 一次唤起会连续处理多个时段：2 小时 = 2 个时段，一次完成
     await processOrderSync()
-    assert.equal((await orderSyncStatus()).windows, 1)
-    await processOrderSync()
+    assert.equal((await orderSyncStatus()).windows, 2)
     assert.equal((await orderSyncStatus()).status, 'COMPLETED')
     assert.equal(calls, 2)
     const job = await startOrderSync('test', 'test', { hours: 1 })
