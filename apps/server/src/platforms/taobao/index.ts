@@ -95,12 +95,32 @@ export function parseItemDetail(resp: any) {
   const paths = list(price.final_promotion_path_list, 'final_promotion_path_map_data')
   const coupon = paths.filter((p) => /券/.test(String(p.promotion_title || ''))).reduce((sum, p) => sum + (decimalCents(p.promotion_fee) || 0), 0)
   return {
+    itemId: item.item_id != null ? String(item.item_id) : null,
     title: String(basic.title || ''),
     image: https(basic.pict_url),
     price: decimalCents(price.zk_final_price ?? price.reserve_price),
     finalPrice: decimalCents(price.final_promotion_price),
     coupon: paths.length ? coupon : null,
     commission: decimalCents(income.commission_amount),
+  }
+}
+// 物料搜索（taobao.tbk.dg.material.optional.upgrade，权限包「物料搜索」）：结果自带含推广位的推广链接
+export function parseMaterialSearch(resp: any, itemId: string | null, title: string) {
+  const rows = list(resp?.result_list, 'map_data')
+  const norm = (t: unknown) => String(t || '').replace(/\s+/g, '')
+  const hit =
+    (itemId && rows.find((r) => String(r.item_id) === itemId)) ||
+    rows.find((r) => norm(r.item_basic_info?.title) === norm(title)) ||
+    null
+  if (!hit) return null
+  const pub = hit.publish_info || {}, price = hit.price_promotion_info || {}
+  const paths = list(price.final_promotion_path_list, 'final_promotion_path_map_data')
+  const coupon = paths.filter((p) => /券/.test(String(p.promotion_title || ''))).reduce((sum, p) => sum + (decimalCents(p.promotion_fee) || 0), 0)
+  return {
+    url: https(pub.coupon_share_url || pub.click_url),
+    coupon: paths.length ? coupon : null,
+    commission: decimalCents(pub.income_info?.commission_amount),
+    finalPrice: decimalCents(price.final_promotion_price),
   }
 }
 export function parseConvert(resp: any) {
@@ -145,11 +165,27 @@ export const taobaoPlugin: PlatformPlugin = {
       notices.push(`商品信息：${(e as Error).message}`)
     }
     let converted: ReturnType<typeof parseConvert> = null
+    const label = info?.title ? `「${info.title}」` : ''
     try {
       converted = parseConvert(await topRequest(c, 'taobao.tbk.dg.general.link.convert', { adzone_id: c.adzoneId, item_dto: [{ item_id: itemId }] }))
     } catch (e) {
-      const title = info?.title ? `「${info.title}」` : ''
-      throw new BadRequestException(`商品${title}转链失败：${(e as Error).message}`)
+      if (!(e instanceof TopError && e.code === '11')) throw new BadRequestException(`商品${label}转链失败：${(e as Error).message}`)
+      // 万能转链为邀约权限；无权限时用「物料搜索」按标题搜索并按商品 ID 匹配，结果中的推广链接已带推广位
+      if (!info?.title) throw new BadRequestException('未开通万能转链，且无法获取商品标题用于物料搜索转链')
+      let found: ReturnType<typeof parseMaterialSearch> = null
+      try {
+        found = parseMaterialSearch(
+          await topRequest(c, 'taobao.tbk.dg.material.optional.upgrade', { adzone_id: c.adzoneId, q: info.title.slice(0, 60), page_size: 20 }),
+          info.itemId,
+          info.title,
+        )
+      } catch (err) {
+        throw new BadRequestException(`商品${label}转链失败（物料搜索）：${(err as Error).message}`)
+      }
+      if (!found?.url) throw new BadRequestException(`商品${label}暂无法转链：物料搜索未找到该商品（可能不在淘宝客推广范围）`)
+      converted = { error: null, url: found.url, password: null, coupon: found.coupon, commission: found.commission }
+      if (found.finalPrice != null && info.finalPrice == null) info.finalPrice = found.finalPrice
+      notices.push('已通过物料搜索转链')
     }
     if (!converted?.url) throw new BadRequestException(`转链未返回推广链接${converted?.error ? `：${converted.error}` : ''}`)
     let password = converted.password
@@ -197,7 +233,9 @@ export const taobaoPlugin: PlatformPlugin = {
     const detail = await probe('taobao.tbk.item.info.upgrade.get', { item_id: '1' })
     const convert = await probe('taobao.tbk.dg.general.link.convert', { adzone_id: c.adzoneId || '0', item_dto: [{ item_id: '1' }] })
     const tpwd = await probe('taobao.tbk.tpwd.create', { url: 'https://s.click.taobao.com/test' })
-    return `签名与 AppKey 验证通过。商品详情：${detail}；万能转链：${convert}；淘口令：${tpwd}${convert === '未开通' ? '。转链需申请「万能转链」相关权限' : ''}`
+    const search = await probe('taobao.tbk.dg.material.optional.upgrade', { adzone_id: c.adzoneId || '0', q: '测试', page_size: 1 })
+    const route = convert === '可用' ? '转链方式：万能转链' : search === '可用' ? '转链方式：物料搜索（万能转链为邀约权限，未开通不影响使用）' : '无可用转链权限，需申请「物料搜索」或「万能转链」'
+    return `签名与 AppKey 验证通过。商品详情：${detail}；物料搜索：${search}；万能转链：${convert}；淘口令：${tpwd}。${route}`
   },
   async queryOrders() {
     throw new BadRequestException('淘宝订单同步尚未接入，需先开通订单查询权限')
