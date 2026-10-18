@@ -16,6 +16,8 @@ type Cursor = {
   windows: number
   total: number
   type: 1 | 3
+  /** 自动同步生成的任务（定期清理） */
+  auto?: boolean
 }
 export async function startOrderSync(
   actor: string,
@@ -51,6 +53,7 @@ export async function startOrderSync(
       windows: 0,
       total: Math.ceil((until.getTime() - from.getTime()) / plugin.maxWindowMs),
       type: hours === 1 ? 3 : 1,
+      ...(options.auto ? { auto: true } : {}),
     }
     const job = await tx.syncJob.create({
       data: { accountId: plugin.accountId, cursor: json(cursor), status: 'QUEUED' },

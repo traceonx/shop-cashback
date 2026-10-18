@@ -566,7 +566,7 @@ async function bootstrap() {
     2000,
   )
   orderTimer.unref()
-  // 自动同步最近订单：按转链活跃度在 1～30 分钟之间动态调整间隔
+  // 自动同步最近订单：按转链活跃度在 15 秒～10 分钟之间动态调整间隔
   startAutoSync()
   app.enableShutdownHooks()
 }
