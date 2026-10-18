@@ -3,6 +3,7 @@ import { db, json } from './database'
 import { readConfig } from './integrations'
 import { platform, listPlatforms } from './platforms/registry'
 import { notifyOrder, type OrderEvent } from './wecom'
+import { ownerBySku } from './attribution'
 
 type Cursor = {
   engine: 'platform-v1'
@@ -87,10 +88,22 @@ export async function orderSyncStatus() {
   }
 }
 let working = false
+/** 后台同步：每次被定时器唤起后连续处理多个时段（最多约 20 秒），而不是每 2 秒只处理一个 */
 export async function processOrderSync() {
   if (working) return
   working = true
   try {
+    const deadline = Date.now() + 20000
+    while (Date.now() < deadline && (await processOrderStep())) {
+      await new Promise((r) => setTimeout(r, 200)) // 稍作间隔，避免触发联盟接口频率限制
+    }
+  } finally {
+    working = false
+  }
+}
+/** 处理一页订单；没有待处理任务时返回 false */
+async function processOrderStep(): Promise<boolean> {
+  {
     const job = await db.syncJob.findFirst({
       where: {
         cursor: { path: ['engine'], equals: 'platform-v1' },
@@ -98,13 +111,13 @@ export async function processOrderSync() {
       },
       orderBy: { createdAt: 'asc' },
     })
-    if (!job) return
+    if (!job) return false
     const lease = new Date()
     const claim = await db.syncJob.updateMany({
       where: { id: job.id, updatedAt: job.updatedAt },
       data: { status: 'RUNNING', updatedAt: lease, startedAt: job.startedAt || lease, attempts: { increment: 1 } },
     })
-    if (!claim.count) return
+    if (!claim.count) return false
     try {
       const c = job.cursor as unknown as Cursor,
         plugin = platform(c.platform),
@@ -153,7 +166,6 @@ export async function processOrderSync() {
                   },
                 })
               : null
-            const owner = promotion ? tracking!.userId : null
             const existing = await tx.affiliateOrder.findUnique({
               where: {
                 platform_accountId_externalOrderId_externalLineId: {
@@ -165,6 +177,12 @@ export async function processOrderSync() {
               },
               select: { userId: true, status: true },
             })
+            // 优先用联盟回传的用户标识；未回传时按「下单前谁转过这个商品」匹配，仅唯一时关联
+            const owner = promotion
+              ? tracking!.userId
+              : existing?.userId
+                ? null
+                : await ownerBySku(tx, plugin.accountId, row.sku, row.placedAt)
             if (owner && existing?.userId && owner !== existing.userId)
               throw new BadRequestException('订单用户标识冲突，已停止同步，请人工核对')
             const key = {
@@ -235,9 +253,9 @@ export async function processOrderSync() {
         where: { id: job.id, status: 'RUNNING', updatedAt: lease },
         data: { status: 'FAILED', finishedAt: new Date(), errorCode: e instanceof Error ? e.message : '同步失败' },
       })
+      return false
     }
-  } finally {
-    working = false
+    return true
   }
 }
 

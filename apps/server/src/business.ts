@@ -177,7 +177,7 @@ export async function listOrders() {
       platform: ({ jd: '京东', taobao: '淘宝', pdd: '拼多多' } as Record<string, string>)[o.platform] || o.platform,
       user: o.user?.name || '未关联用户',
       userId: o.userId || '',
-      attribution: o.userId ? '已关联返现用户' : '未回传可匹配的用户标识',
+      attribution: o.userId ? '已关联' : '未关联',
       amount: centsNumber(o.amountCents) ?? values.amount,
       commissionBase: values.commissionBase,
       paidAmount: values.commissionBase ?? centsNumber(o.paidAmountCents),

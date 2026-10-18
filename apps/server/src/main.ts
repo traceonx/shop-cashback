@@ -263,6 +263,23 @@ class AdminController {
   @Get('users') async users() {
     return { data: await business.listUsers() }
   }
+  @Patch('orders/:id/user') async assignOrder(@Param('id') id: string, @Body() body: { userId?: string | null }, @Req() req: AuthRequest) {
+    const order = await db.affiliateOrder.findUnique({ where: { id } })
+    if (!order) throw new NotFoundException('订单不存在')
+    const userId = body?.userId || null
+    if (userId && !(await db.user.findUnique({ where: { id: userId } }))) throw new NotFoundException('用户不存在')
+    // 同一订单号的所有订单行一起关联
+    await db.$transaction([
+      db.affiliateOrder.updateMany({
+        where: { platform: order.platform, accountId: order.accountId, externalOrderId: order.externalOrderId },
+        data: { userId },
+      }),
+      db.auditLog.create({
+        data: { actorId: req.actor!.id, action: userId ? '手动关联订单用户' : '取消订单关联', targetId: order.externalOrderId, traceId: req.traceId!, diff: { from: order.userId, to: userId } },
+      }),
+    ])
+    return { data: { ok: true } }
+  }
   @Patch('users/:id') async updateUser(
     @Param('id') id: string,
     @Body() body: { ratio?: number; status?: string },

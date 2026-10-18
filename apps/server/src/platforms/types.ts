@@ -42,6 +42,8 @@ export interface PlatformPlugin {
     link: string
     snapshot: {
       product: string
+      /** 商品 SKU，用于订单未回传用户标识时按商品匹配下单用户 */
+      sku?: string
       price: number | null
       imageUrl: string | null
       commission: number | null

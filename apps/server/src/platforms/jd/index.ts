@@ -259,6 +259,7 @@ export const jdPlugin: PlatformPlugin = {
     )
       throw new BadRequestException('京东推广链接格式无法确认')
     let product = '商品信息暂不可用',
+      sku: string | null = null,
       price: number | null = null,
       imageUrl: string | null = null,
       commission: number | null = null,
@@ -273,6 +274,7 @@ export const jdPlugin: PlatformPlugin = {
       const goods = jdList(data, 'goodsResp')
       if (!goods || goods.length !== 1) throw new Error('未能唯一匹配商品信息')
       const item = goods[0]
+      if (item.skuId) sku = String(item.skuId)
       product = String(item.skuName || product)
       price = decimalCents(item.priceInfo?.price)
       imageUrl = jdOrderImage({ goodsInfo: { imageUrl: jdList(item.imageInfo?.imageList, 'urlInfo')?.[0]?.url } })
@@ -345,10 +347,11 @@ export const jdPlugin: PlatformPlugin = {
     }
     if (!complete) {
       try {
-        const sku = await resolveJdSku(url)
-        if (!sku) throw new Error('无法从短链接识别商品，请使用商品详情链接重试')
-        const info = await jdRequest(c, 'jd.union.open.goods.promotiongoodsinfo.query', { skuIds: sku })
-        const item = Array.isArray(info) ? info.find((v: any) => String(v.skuId) === sku) : null
+        const resolved = await resolveJdSku(url)
+        if (!resolved) throw new Error('无法从短链接识别商品，请使用商品详情链接重试')
+        sku = resolved
+        const info = await jdRequest(c, 'jd.union.open.goods.promotiongoodsinfo.query', { skuIds: resolved })
+        const item = Array.isArray(info) ? info.find((v: any) => String(v.skuId) === resolved) : null
         if (!item) throw new Error('商品接口未返回该商品')
         product = String(item.goodsName || product)
         price = decimalCents(item.unitPrice)
@@ -362,8 +365,10 @@ export const jdPlugin: PlatformPlugin = {
         )
       }
     }
+    if (!sku) sku = (await resolveJdSku(url).catch(() => undefined)) || null
     const snapshot = {
       product,
+      sku: sku || undefined,
       price,
       imageUrl,
       commission,

@@ -5,6 +5,7 @@ import { db, dateText } from './database'
 import { readConfig, wecomToken, wecomUrl, wecomError, type Config } from './integrations'
 import { convert, settings } from './business'
 import { menuCommand } from './wecom-menu'
+import { claimOrder } from './attribution'
 import { listPlatforms } from './platforms/registry'
 export function decryptCallback(c: Config, signature: string, timestamp: string, nonce: string, encrypted: string) {
   if (!c.token || !c.aesKey || !c.corpId) throw new BadRequestException('请先配置企业微信回调参数')
@@ -196,7 +197,9 @@ export async function processInbox() {
       if (!identity.user.enabled) reply = '当前账户已禁用，请联系管理员。'
       else if (content.trim() === '/查返利') reply = '直接发送京东、淘宝 / 天猫商品链接或含链接的分享文案，即可查询优惠与预计返现。价格和优惠以实际下单为准。'
       else if (content.trim() === '/支持平台') reply = `当前已接入：${listPlatforms().map((p) => p.name).join('、')}。\n直接发送商品链接或分享文案即可查询优惠与返现。各平台可用性取决于实际接口权限。`
-      else if (content.trim() === '/订单找回') reply = '订单找回暂未开放。请联系管理员核查订单号，核验前不会自动绑定或发放返现。'
+      else if (content.trim() === '/订单找回')
+        reply = '发送「找回 订单号」即可找回订单，例如：找回 312345678901\n需要在下单前 7 天内通过本应用发送过该商品链接；订单同步约有 10 分钟延迟。'
+      else if (/^\/?找回\s*\d{8,24}$/.test(content.trim())) reply = await claimOrder(id, content.trim().replace(/\D/g, ''))
       else if (content.trim() === '/余额') {
         const w = await db.walletAccount.findUnique({ where: { userId: id } })
         const amount = (n?: bigint) => `${(Number(n || 0n) / 100).toFixed(2)}`

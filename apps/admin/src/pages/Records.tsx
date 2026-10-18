@@ -113,7 +113,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Row | null>(null)
   const [converting, setConverting] = useState(new URLSearchParams(useLocation().search).has('test'))
-  const [syncHours, setSyncHours] = useState('168')
+  const [syncHours, setSyncHours] = useState('1')
   const [sync, setSync] = useState<SyncState>(null)
   const [syncing, setSyncing] = useState(false)
 
@@ -137,22 +137,24 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
   useEffect(() => {
     if (kind !== 'orders') return
     let alive = true
-    let finished = ''
+    let seen = ''
     const poll = async () => {
       try {
         const job = await api<SyncState>('/orders/sync-status')
         if (!alive) return
         setSync(job)
-        if (job?.status === 'COMPLETED' && finished !== job.id) {
-          finished = job.id
-          setRows(await api<Row[]>('/orders'))
+        // 同步过程中导入了新订单或任务完成时，立即刷新列表
+        const mark = job ? `${job.id}:${job.count}:${job.status}` : ''
+        if (job && mark !== seen && (job.count > 0 || job.status === 'COMPLETED')) {
+          if (seen) setRows(await api<Row[]>('/orders'))
         }
+        seen = mark
       } catch {
         /* 轮询失败不打断页面 */
       }
     }
     void poll()
-    const timer = setInterval(poll, 5000)
+    const timer = setInterval(poll, 2000)
     return () => {
       alive = false
       clearInterval(timer)
@@ -234,7 +236,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
                     value={syncHours}
                     onChange={setSyncHours}
                     options={[
-                      ['1', '最近 1 小时'],
+                      ['1', '最近更新（1 小时）'],
                       ['24', '最近 1 天'],
                       ['168', '最近 7 天'],
                       ['720', '最近 30 天'],
@@ -374,6 +376,12 @@ function RecordDetail({
   const [note, setNote] = useState('')
   const [proof, setProof] = useState('')
   const reviewing = kind === 'withdrawals' && ['PENDING_REVIEW', 'PENDING_PAYMENT'].includes(String(row.status))
+  // 订单：可手动关联返现用户
+  const [owner, setOwner] = useState(String(row.userId || ''))
+  const [users, setUsers] = useState<Row[]>([])
+  useEffect(() => {
+    if (kind === 'orders') api<Row[]>('/users').then(setUsers).catch(() => {})
+  }, [kind])
 
   const run = async (request: () => Promise<unknown>, message: string) => {
     setBusy(true)
@@ -396,7 +404,19 @@ function RecordDetail({
   const patchUser = (body: object) => run(() => api(`/users/${row.id}`, { method: 'PATCH', body: JSON.stringify(body) }), '用户信息已更新')
 
   let footer = null
-  if (kind === 'users')
+  if (kind === 'orders')
+    footer = (
+      <Button
+        variant="primary"
+        icon={Check}
+        loading={busy}
+        disabled={owner === String(row.userId || '')}
+        onClick={() => run(() => api(`/orders/${row.id}/user`, { method: 'PATCH', body: JSON.stringify({ userId: owner || null }) }), owner ? '已关联返现用户' : '已取消关联')}
+      >
+        保存关联
+      </Button>
+    )
+  else if (kind === 'users')
     footer = (
       <>
         <Button variant="danger" disabled={busy} onClick={async () => {
@@ -455,6 +475,15 @@ function RecordDetail({
               </div>
             ))}
           </dl>
+        )}
+        {kind === 'orders' && (
+          <Select
+            label="返现用户"
+            hint="联盟未回传用户标识时，可在这里手动关联；同一订单号的所有商品一起关联"
+            value={owner}
+            onChange={setOwner}
+            options={[['', '未关联'], ...users.map((u): [string, string] => [u.id, `${u.name}${u.externalId ? `（${u.externalId}）` : ''}`])]}
+          />
         )}
         {kind === 'users' && (
           <TextField label="专属返现比例（%）" type="number" min={0} max={100} value={ratio} onChange={(e) => setRatio(Number(e.target.value))} />
