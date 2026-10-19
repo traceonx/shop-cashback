@@ -7,6 +7,7 @@ import { readConfig } from './integrations'
 import { platformForContent, platform } from './platforms/registry'
 import { ECAPI_KIND, ecapiConvert, ecapiEnabled } from './platforms/jd/ecapi'
 import { TB_ECAPI_KIND, tbEcapiEnabled, tbHybridConvert } from './platforms/taobao/ecapi'
+import { dbAdzoneStore, ensureUserAdzone, perUserAdzoneEnabled, userPid } from './platforms/taobao/adzones'
 
 export async function settings() {
   const row = await db.systemConfig.findUnique({ where: { key: 'rules' } })
@@ -111,9 +112,25 @@ export async function convert(content: string, actor: string, trace: string, use
   const useThird = !!third && (plugin.id === 'jd' ? ecapiEnabled(third) : tbEcapiEnabled(third))
   if (!(useThird && plugin.id === 'jd') && !plugin.configured(c)) throw new BadRequestException('请先保存该平台的应用凭证')
   let trackingCode = ''
+  let conf = c
+  const notices: string[] = []
   if (userId) {
     const user = await db.user.findUnique({ where: { id: userId } })
     if (!user?.enabled) throw new BadRequestException('返现用户不存在或已禁用')
+  }
+  // 淘宝：每个用户用自己的推广位转链，订单回传的 adzone_id 即可精确关联用户；拿不到推广位时退回默认 PID（按商品匹配兜底）
+  if (userId && plugin.id === 'taobao' && perUserAdzoneEnabled(c)) {
+    try {
+      const adzone = await ensureUserAdzone(dbAdzoneStore(), c, useThird ? third : null, userId)
+      const pid = adzone ? userPid(c, adzone) : null
+      if (adzone && pid) {
+        trackingCode = adzone
+        conf = { ...c, pid, adzoneId: adzone }
+      }
+    } catch (e) {
+      notices.push(`用户专属推广位分配失败，已使用默认推广位：${(e as Error).message}`)
+    }
+  } else if (userId && plugin.id !== 'taobao') {
     const tracking = await db.userTrackingCode.upsert({
       where: { accountId_userId: { accountId: plugin.accountId, userId } },
       create: { accountId: plugin.accountId, userId, code: randomBytes(16).toString('hex') },
@@ -133,10 +150,11 @@ export async function convert(content: string, actor: string, trace: string, use
   })
   try {
     const { link, snapshot } = !useThird
-      ? await plugin.convert(c, url, trackingCode || undefined, content)
+      ? await plugin.convert(conf, url, trackingCode || undefined, content)
       : plugin.id === 'jd'
         ? await ecapiConvert(third!, url, trackingCode || undefined)
-        : await tbHybridConvert(c, third!, url, content)
+        : await tbHybridConvert(conf, third!, url, content)
+    if (notices.length) snapshot.infoMessage = [...notices, snapshot.infoMessage].filter(Boolean).join('；')
     const rule = userId ? await db.rebateRule.findFirst({ where: { scopeKey: 'user:' + userId } }) : null
     const basisPoints = rule?.basisPoints ?? Math.round((await settings()).ratio * 100)
     snapshot.rebate =

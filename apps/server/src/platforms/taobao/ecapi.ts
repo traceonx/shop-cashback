@@ -31,7 +31,8 @@ const isNewId = (v: unknown) => typeof v === 'string' && /[A-Za-z]/.test(v) && /
 
 const TTL = 24 * 3600000
 // 数字 ID → 新版 ID，以及喵有券给出的推广短链（官方长链转短链不可用时兜底）
-const idCache = new Map<string, { id: string; short: string | null; at: number }>()
+// 推广短链与生成它的 PID 绑定：每个用户有自己的推广位时，不能把 A 的短链给 B
+const idCache = new Map<string, { id: string; short: string | null; pid: string; at: number }>()
 function cached(key: string | null) {
   if (!key) return null
   const hit = idCache.get(key)
@@ -39,10 +40,10 @@ function cached(key: string | null) {
   idCache.delete(key)
   return null
 }
-function remember(key: string | null, id: string, short: string | null) {
+function remember(key: string | null, id: string, short: string | null, pid: string) {
   if (!key) return
   if (idCache.size >= 2000) idCache.delete(idCache.keys().next().value!)
-  idCache.set(key, { id, short, at: Date.now() })
+  idCache.set(key, { id, short, pid, at: Date.now() })
 }
 export const clearTbIdCache = () => idCache.clear()
 
@@ -103,13 +104,13 @@ export async function tbHybridConvert(
   let promo: Awaited<ReturnType<typeof promote>> | null = null
   const hit = cached(numericId)
   let newId = hit?.id ?? null
-  let ecapiShort = hit?.short ?? null
+  let ecapiShort = hit && hit.pid === official.pid ? hit.short : null
   let found: Awaited<ReturnType<typeof officialById>> = null
   const viaEcapi = async () => {
     promo = await promote(t, official, material)
     newId = promo.newId
     ecapiShort = isShortTaobao(promo.url) ? promo.url : null
-    if (newId) remember(numericId, newId, ecapiShort)
+    if (newId) remember(numericId, newId, ecapiShort, official.pid)
   }
   if (!newId) await viaEcapi()
   if (newId) {

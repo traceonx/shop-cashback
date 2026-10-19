@@ -7,6 +7,7 @@ import { ECAPI_KIND, ecapiConfigured, ecapiFields, ecapiTest } from './platforms
 import { TB_ECAPI_KIND, tbEcapiConfigured, tbEcapiFields, tbEcapiTest } from './platforms/taobao/ecapi'
 import { normalizePublicUrl } from './platforms/taobao/oauth'
 import { orderSourceOf } from './platforms/taobao/orders'
+import { TAOBAO_ACCOUNT, isAdzoneCode, parseAdzonePool } from './platforms/taobao/adzones'
 
 /** 第三方接入（喵有券）：不属于联盟平台账号，独立配置并用开关启用 */
 const thirdParty: Record<string, { fields: readonly (readonly [string, string, boolean])[]; configured: (c: Config) => boolean; test: (c: Config) => Promise<string> }> = {
@@ -81,7 +82,7 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
   for (const [key, , secret] of configFields(kind)) {
     const value = (body as Config)[key]
     if (value === undefined) continue
-    if (typeof value !== 'string' || value.length > 2000) throw new BadRequestException(`${key} 格式无效`)
+    if (typeof value !== 'string' || value.length > (key === 'adzonePool' ? 10000 : 2000)) throw new BadRequestException(`${key} 格式无效`)
     if (secret && !value.trim()) continue
     next[key] = value.trim()
   }
@@ -100,9 +101,21 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
   if (kind === 'taobao') {
     if (next.orderSource && !['official-sc', 'official', 'ecapi'].includes(next.orderSource)) throw new BadRequestException('订单数据源无效')
     if (next.autoMatch && !['true', 'false'].includes(next.autoMatch)) throw new BadRequestException('自动关联开关无效')
+    if (next.perUserAdzone && !['true', 'false'].includes(next.perUserAdzone)) throw new BadRequestException('独立推广位开关无效')
     next.publicUrl = normalizePublicUrl(next.publicUrl) || ''
     if (next.pid && !/^mm_\d+_\d+_\d+$/.test(next.pid)) throw new BadRequestException('PID 格式应为 mm_账号_媒体_推广位')
     next.adzoneId = next.pid ? next.pid.split('_')[3] : ''
+    if (next.adzonePool) {
+      if (!next.pid) throw new BadRequestException('请先填写默认推广位 PID')
+      next.adzonePool = parseAdzonePool(next.adzonePool, next, true).map((e) => e.pid).join('\n')
+    }
+    // 已绑定用户的推广位不能从池里移除：移除后无法再拼出该用户的 PID
+    const kept = new Set(parseAdzonePool(next.adzonePool, next).map((e) => e.adzone))
+    const removed = parseAdzonePool(previous.adzonePool, previous).filter((e) => !kept.has(e.adzone))
+    if (removed.length) {
+      const bound = await db.userTrackingCode.findMany({ where: { accountId: TAOBAO_ACCOUNT, code: { in: removed.map((e) => e.adzone) } }, select: { code: true } })
+      if (bound.some((b) => isAdzoneCode(b.code))) throw new BadRequestException(`推广位 ${bound.map((b) => b.code).join('、')} 已绑定用户，不能从推广位池移除`)
+    }
   }
   await db.$transaction(async (tx) => {
     if (isThirdParty(kind)) {

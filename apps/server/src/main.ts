@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { adzoneBindings } from './platforms/taobao/adzones'
 import { AppLogger, readLogs, logText } from './logs'
 import './config'
 import { NestFactory } from '@nestjs/core'
@@ -378,6 +379,9 @@ class AdminController {
         maxHistoryDays: p.maxHistoryDays,
       })),
     }
+  }
+  @Get('integrations/taobao/adzones') async taobaoAdzones() {
+    return { data: await adzoneBindings(await readConfig('taobao')) }
   }
   @Get('integrations/taobao/oauth') async taobaoOAuthStatus() {
     return { data: await taobaoAuthStatus(dbOAuthStore(), await readConfig('taobao')) }

@@ -9,4 +9,6 @@ export const taobaoFields: readonly ConfigField[] = [
   ['orderSource', '订单数据源', false],
   ['publicUrl', '外部访问地址（淘宝授权回调用）', false],
   ['autoMatch', '按商品自动关联用户', false],
+  ['perUserAdzone', '每个用户独立推广位', false],
+  ['adzonePool', '推广位池（每行一个 PID）', false],
 ]

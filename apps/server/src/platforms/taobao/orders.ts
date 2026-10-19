@@ -73,8 +73,8 @@ export function normalizeTaobaoOrder(raw: any): PlatformOrder {
   const status = String(raw.tk_status ?? 'UNKNOWN')
   const num = Number(raw.item_num)
   return {
-    // 未接入渠道 ID（relation_id）前没有可靠的用户标识，订单进入待人工关联
-    trackingCode: null,
+    // 推广位 ID：用户专属推广位转链的订单据此精确关联用户（默认推广位不属于任何用户，查不到即走商品匹配）
+    trackingCode: /^\d{4,20}$/.test(String(raw.adzone_id ?? '')) ? String(raw.adzone_id) : null,
     status: taobaoOrderStatus(status),
     orderId,
     lineId,
