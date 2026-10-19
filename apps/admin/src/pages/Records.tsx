@@ -96,7 +96,8 @@ function cell(kind: RecordKind, key: string, r: Row) {
       </div>
     )
   if (key === 'ratio') return v == null ? '待确认' : <span title={String(r.ratioNote || '')}>{String(v)}%</span>
-  if (v == null || v === '') return <span className="text-faint">{key === 'completedAt' && r.status !== 'CANCELLED' ? '未完成' : '—'}</span>
+  if (v == null || v === '')
+    return <span className="text-faint">{key === 'completedAt' && r.status !== 'CANCELLED' ? (r.platform === '淘宝' ? '未结算' : '未完成') : '—'}</span>
   return <span className={monoKeys.includes(key) ? 'text-mono' : key.endsWith('At') ? 'nowrap text-muted' : undefined}>{String(v)}</span>
 }
 
@@ -128,7 +129,8 @@ function ago(at?: string | null) {
 
 /** platform：订单管理按平台拆成子菜单（京东订单 / 淘宝订单），列表、同步与同步状态都只针对该平台 */
 export function Records({ kind, notify, platform }: { kind: RecordKind; notify: Notify; platform?: 'jd' | 'taobao' }) {
-  const { columns: allColumns } = config[kind]
+  // 淘宝订单的完成时间是联盟佣金结算时间（tk_earning_time），列名随平台调整
+  const allColumns = config[kind].columns.map((c): Column => (platform === 'taobao' && c[0] === 'completedAt' ? ['completedAt', '佣金结算时间', c[2]] : c))
   const qs = kind === 'orders' && platform ? `?platform=${platform}` : ''
   const listUrl = `/${kind}${qs}`
   const columns = allColumns.filter((c) => !c[2])
