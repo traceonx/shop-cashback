@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common'
 import type { PlatformConfig, PlatformPlugin } from '../types'
 import { ecapiCall } from '../jd/ecapi'
-import { parseMaterialSearch, resolveShortLink, shareTitle, topRequest } from './index'
+import { isShortTaobao, parseMaterialSearch, resolveShortLink, shareTitle, shortTaobaoLink, topRequest } from './index'
 
 /**
  * 淘宝第三方接入：喵有券（ecapi.cn）+ 淘宝官方混合转链。
@@ -30,18 +30,19 @@ const rowsOf = (v: any, key: string): any[] =>
 const isNewId = (v: unknown) => typeof v === 'string' && /[A-Za-z]/.test(v) && /^[\w-]{8,80}$/.test(v)
 
 const TTL = 24 * 3600000
-const idCache = new Map<string, { id: string; at: number }>()
+// 数字 ID → 新版 ID，以及喵有券给出的推广短链（官方长链转短链不可用时兜底）
+const idCache = new Map<string, { id: string; short: string | null; at: number }>()
 function cached(key: string | null) {
   if (!key) return null
   const hit = idCache.get(key)
-  if (hit && Date.now() - hit.at < TTL) return hit.id
+  if (hit && Date.now() - hit.at < TTL) return hit
   idCache.delete(key)
   return null
 }
-function remember(key: string | null, id: string) {
+function remember(key: string | null, id: string, short: string | null) {
   if (!key) return
   if (idCache.size >= 2000) idCache.delete(idCache.keys().next().value!)
-  idCache.set(key, { id, at: Date.now() })
+  idCache.set(key, { id, short, at: Date.now() })
 }
 export const clearTbIdCache = () => idCache.clear()
 
@@ -96,12 +97,15 @@ export async function tbHybridConvert(
   const numericId = (await resolveShortLink(url).catch(() => ({ itemId: null }))).itemId
   const material = (content || url).replace(/\s+/g, ' ').trim().slice(0, 500)
   let promo: Awaited<ReturnType<typeof promote>> | null = null
-  let newId = cached(numericId)
+  const hit = cached(numericId)
+  let newId = hit?.id ?? null
+  let ecapiShort = hit?.short ?? null
   let found: Awaited<ReturnType<typeof officialById>> = null
   const viaEcapi = async () => {
     promo = await promote(t, official, material)
     newId = promo.newId
-    if (newId) remember(numericId, newId)
+    ecapiShort = isShortTaobao(promo.url) ? promo.url : null
+    if (newId) remember(numericId, newId, ecapiShort)
   }
   if (!newId) await viaEcapi()
   if (newId) {
@@ -127,6 +131,11 @@ export async function tbHybridConvert(
     password = p.tpwd
     notices.push('未取到官方价格与佣金，已使用喵有券推广链接')
   } else throw new BadRequestException(`商品${title ? `「${title}」` : ''}暂无法转链${notices.length ? `（${notices.join('；')}）` : ''}`)
+  // 官方物料链接很长，转成 s.click.taobao.com 短链；官方转短链不可用时用喵有券的推广短链（同一 PID）
+  if (!isShortTaobao(link)) {
+    const short = (await shortTaobaoLink(official, link!).catch(() => null)) || ecapiShort
+    if (short) link = short
+  }
   if (!password) {
     try {
       const r = await topRequest(official, 'taobao.tbk.tpwd.create', { url: link })

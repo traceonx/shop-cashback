@@ -202,6 +202,16 @@ export function parseMaterialSearch(rows: any[], itemId: string | null, title: s
     { status: 'none' }
   )
 }
+// 推广短链：s.click.taobao.com/xxxx（无查询参数）。物料搜索返回的是很长的 coupon_share_url / click_url，不便复制
+export const isShortTaobao = (u: unknown) => typeof u === 'string' && /^https:\/\/s\.click\.taobao\.com\/[A-Za-z0-9]{1,24}$/.test(u)
+/** 长链转短链（taobao.tbk.spread.get）；失败或未开通返回 null，由调用方保留原链接 */
+export async function shortTaobaoLink(c: PlatformConfig, link: string): Promise<string | null> {
+  if (isShortTaobao(link)) return link
+  const resp = await topRequest(c, 'taobao.tbk.spread.get', { requests: [{ url: link }] })
+  const row = list(resp?.results, 'tbk_spread')[0]
+  const short = https(row?.content)
+  return isShortTaobao(short) ? short : null
+}
 export function parseConvert(resp: any) {
   const row = list(resp?.data?.item_url_list, 'item_url_list')[0] || list(resp?.data, 'item_url_list')[0]
   if (!row) return null
@@ -296,17 +306,19 @@ export const taobaoPlugin: PlatformPlugin = {
       notices.push('已通过物料搜索转链')
     }
     if (!converted?.url) throw new BadRequestException(`转链未返回推广链接${converted?.error ? `：${converted.error}` : ''}`)
+    // 物料搜索返回的长链转成 s.click.taobao.com 短链，便于复制；转不了时保留原链接
+    const promoUrl: string = (isShortTaobao(converted.url) ? null : await shortTaobaoLink(c, converted.url).catch(() => null)) || converted.url
     let password = converted.password
     if (!password) {
       try {
-        const t = await topRequest(c, 'taobao.tbk.tpwd.create', { url: converted.url })
+        const t = await topRequest(c, 'taobao.tbk.tpwd.create', { url: promoUrl })
         password = t?.data?.password_simple || null
       } catch (e) {
         notices.push(`淘口令：${(e as Error).message}`)
       }
     }
     return {
-      link: converted.url,
+      link: promoUrl,
       snapshot: {
         product: info?.title || '淘宝商品',
         price: info?.price ?? null,
@@ -343,8 +355,9 @@ export const taobaoPlugin: PlatformPlugin = {
     const convert = await probe('taobao.tbk.dg.general.link.convert', { adzone_id: c.adzoneId || '0', item_dto: [{ item_id: '1' }] })
     const tpwd = await probe('taobao.tbk.tpwd.create', { url: 'https://s.click.taobao.com/test' })
     const search = await probe('taobao.tbk.dg.material.optional.upgrade', { adzone_id: c.adzoneId || '0', q: '测试', page_size: 1 })
+    const spread = await probe('taobao.tbk.spread.get', { requests: [{ url: 'https://uland.taobao.com/' }] })
     const route = convert === '可用' ? '转链方式：万能转链' : search === '可用' ? '转链方式：物料搜索（万能转链为邀约权限，未开通不影响使用）' : '无可用转链权限，需申请「物料搜索」或「万能转链」'
-    return `签名与 AppKey 验证通过。商品详情：${detail}；物料搜索：${search}；万能转链：${convert}；淘口令：${tpwd}。${route}`
+    return `签名与 AppKey 验证通过。商品详情：${detail}；物料搜索：${search}；万能转链：${convert}；淘口令：${tpwd}；长链转短链：${spread}。${route}`
   },
   async queryOrders() {
     throw new BadRequestException('淘宝订单同步尚未接入，需先开通订单查询权限')

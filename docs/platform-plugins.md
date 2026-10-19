@@ -39,6 +39,7 @@
   2. 喵有券[万能解析 doCommonPromotionUrlParse](https://www.ecapi.cn/index/index/openapi/id/346.shtml?ptype=1)（付费会员接口）：解析上一步的推广淘口令，`link_info_dto.material_id` 为新版联盟商品 ID。
   3. 官方 `taobao.tbk.dg.material.optional.upgrade`：`q=https://uland.taobao.com/item/edetail?id=新版ID`、`biz_scene_id=1`，只接受 `item_id` 与新版 ID 完全一致的结果，取价格、优惠、预计佣金与官方推广链接，再用官方 `tbk.tpwd.create` 生成淘口令。
 - 次数：每个新商品 2 次喵有券 + 1 次官方；数字 ID → 新版 ID 在进程内缓存 24 小时（最多 2000 条），同一商品重复转链只调官方。缓存的 ID 查不到时自动重新走喵有券。
+- 短链：物料搜索给的是很长的 coupon_share_url / click_url，转链后先用官方 `taobao.tbk.spread.get` 转成 `s.click.taobao.com` 短链（官方淘宝接入的物料搜索转链同样处理）；未开通或失败时用第 1 步喵有券返回的推广短链（同一 PID，随新版 ID 一起缓存），都拿不到才保留长链。淘口令用最终链接生成。
 - 兜底：官方未命中时使用喵有券返回的推广链接与淘口令，提示「未取到官方价格与佣金」，不计算预计返现，避免混用两套佣金口径（实测同一商品喵有券佣金带多件条件，与官方单品预计佣金不同）。
 - 开关：启用且 apkey、tbname 齐全时淘宝链接走混合流程（仍需官方 AppKey / AppSecret / PID）；关闭时沿用官方标题搜索转链。混合流程失败直接报错，不自动退回官方。
 - 网络：喵有券按公网出口 IP 白名单校验（401），代理设置同京东（`PROXY_HOST`，见上一节）；淘宝官方接口仍直连。「测试接口」调用 getTbAuthList，确认 tbname 已授权并显示到期时间。

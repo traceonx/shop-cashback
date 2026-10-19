@@ -73,13 +73,17 @@ test('无万能转链权限时改用物料搜索转链，并生成淘口令', as
           { item_id: 'AbC-123', item_basic_info: { title: '测试 商品' }, price_promotion_info: { final_promotion_price: '79.00' }, publish_info: { coupon_share_url: '//uland.taobao.com/coupon/edetail?e=x', income_info: { commission_amount: '3.95' } } },
         ] } })
       }
+      if (method === 'taobao.tbk.spread.get') {
+        assert.equal(JSON.parse(p.get('requests')!)[0].url, 'https://uland.taobao.com/coupon/edetail?e=x')
+        return ok('tbk_spread_get_response', { results: { tbk_spread: [{ content: 'https://s.click.taobao.com/Tb88s', err_msg: 'OK' }] } })
+      }
       assert.equal(method, 'taobao.tbk.tpwd.create')
-      assert.equal(p.get('url'), 'https://uland.taobao.com/coupon/edetail?e=x')
+      assert.equal(p.get('url'), 'https://s.click.taobao.com/Tb88s')
       return ok('tbk_tpwd_create_response', { data: { password_simple: '￥Tb88￥' } })
     }
     const r = await taobaoPlugin.convert({ appKey: 'k', appSecret: 's', pid: 'mm_1_2_3', adzoneId: '3' }, 'https://item.taobao.com/item.htm?id=1')
-    assert.deepEqual(methods, ['taobao.tbk.item.info.upgrade.get', 'taobao.tbk.dg.general.link.convert', 'taobao.tbk.dg.material.optional.upgrade', 'taobao.tbk.tpwd.create'])
-    assert.equal(r.link, 'https://uland.taobao.com/coupon/edetail?e=x')
+    assert.deepEqual(methods, ['taobao.tbk.item.info.upgrade.get', 'taobao.tbk.dg.general.link.convert', 'taobao.tbk.dg.material.optional.upgrade', 'taobao.tbk.spread.get', 'taobao.tbk.tpwd.create'])
+    assert.equal(r.link, 'https://s.click.taobao.com/Tb88s')
     assert.equal(r.snapshot.password, '￥Tb88￥')
     assert.equal(r.snapshot.commission, 395)
     assert.equal(r.snapshot.payablePrice, 7900)

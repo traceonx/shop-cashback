@@ -10,10 +10,10 @@ const row = (id: string, shop: string) => ({
   item_id: id,
   item_basic_info: { title: 'BOLON暴龙近视眼镜框商务眉架男金丝钛镜框斯文可配度数女BT6026', shop_title: shop, pict_url: '//img.alicdn.com/a.jpg' },
   price_promotion_info: { zk_final_price: '1138', final_promotion_price: '873', final_promotion_path_list: { final_promotion_path_map_data: [{ promotion_title: '店铺券', promotion_fee: '95' }] } },
-  publish_info: { coupon_share_url: '//s.click.taobao.com/official', income_info: { commission_amount: '13.36' } },
+  publish_info: { coupon_share_url: '//s.click.taobao.com/t?e=m%3D2%26s%3DLONGOFFICIAL', income_info: { commission_amount: '13.36' } },
 })
 
-function mock(officialRows: unknown[]) {
+function mock(officialRows: unknown[], spreadOk = true) {
   const calls: string[] = []
   globalThis.fetch = async (input, init) => {
     const u = new URL(String(input))
@@ -30,6 +30,10 @@ function mock(officialRows: unknown[]) {
     }
     const p = init!.body as URLSearchParams
     calls.push(p.get('method')!)
+    if (p.get('method') === 'taobao.tbk.spread.get') {
+      assert.equal(JSON.parse(p.get('requests')!)[0].url, 'https://s.click.taobao.com/t?e=m%3D2%26s%3DLONGOFFICIAL')
+      return new Response(JSON.stringify(spreadOk ? { tbk_spread_get_response: { results: { tbk_spread: [{ content: 'https://s.click.taobao.com/short1', err_msg: 'OK' }] } } } : { error_response: { code: 11, msg: 'Insufficient isv permissions' } }))
+    }
     if (p.get('method') === 'taobao.tbk.tpwd.create') return new Response(JSON.stringify({ tbk_tpwd_create_response: { data: { password_simple: '￥OFFICIAL￥' } } }))
     assert.equal(p.get('q'), 'https://uland.taobao.com/item/edetail?id=oQa8pyahrt-NEWID')
     return new Response(JSON.stringify({ tbk_dg_material_optional_upgrade_response: { result_list: { map_data: officialRows } } }))
@@ -49,7 +53,7 @@ test('喵有券解析新版 ID 后按 ID 命中官方物料，同款他店不会
   try {
     const calls = mock([row('8B5mjq-OTHER', '博士眼镜官方旗舰店'), row('oQa8pyahrt-NEWID', '暴龙品尊专卖店')])
     const r = await tbHybridConvert(official, third, url, content)
-    assert.equal(r.link, 'https://s.click.taobao.com/official')
+    assert.equal(r.link, 'https://s.click.taobao.com/short1')
     assert.equal(r.snapshot.shop, '暴龙品尊专卖店')
     assert.equal(r.snapshot.price, 113800)
     assert.equal(r.snapshot.payablePrice, 87300)
@@ -70,7 +74,7 @@ test('按新版ID链接精确查询的单条结果允许官方重新生成动态
   try {
     mock([row('differentDynamicPrefix-NEWID', '暴龙品尊专卖店')])
     const r = await tbHybridConvert(official, third, url, content)
-    assert.equal(r.link, 'https://s.click.taobao.com/official')
+    assert.equal(r.link, 'https://s.click.taobao.com/short1')
     assert.equal(r.snapshot.price, 113800)
     assert.equal(r.snapshot.payablePrice, 87300)
     assert.equal(r.snapshot.commission, 1336)
@@ -90,6 +94,21 @@ test('官方精确查询返回多个未匹配商品时用喵有券推广链接�
     assert.equal(r.snapshot.password, '￥ECAPI￥')
     assert.equal(r.snapshot.commission, null)
     assert.match(r.snapshot.infoMessage!, /喵有券推广链接/)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('官方长链转短链未开通时，用喵有券推广短链（含缓存）替代长链', async () => {
+  const original = globalThis.fetch
+  clearTbIdCache()
+  try {
+    mock([row('oQa8pyahrt-NEWID', '暴龙品尊专卖店')], false)
+    const r = await tbHybridConvert(official, third, url, content)
+    assert.equal(r.link, 'https://s.click.taobao.com/ecapi')
+    assert.equal(r.snapshot.commission, 1336)
+    const again = await tbHybridConvert(official, third, url, content)
+    assert.equal(again.link, 'https://s.click.taobao.com/ecapi')
   } finally {
     globalThis.fetch = original
   }
