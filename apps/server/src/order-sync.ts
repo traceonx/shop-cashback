@@ -245,7 +245,9 @@ async function processOrderStep(): Promise<boolean> {
             // 状态有变化（新订单或状态更新）时通知下单用户；只通知近期订单，避免同步历史时刷屏
             const notifyUser = owner || existing?.userId
             const recent = Date.now() - row.placedAt.getTime() < (existing ? 30 : 2) * 86400000
-            if (notifyUser && recent && existing?.status !== row.status) {
+            // 金额和佣金都为 0 的订单行（赠品、非卖品）不单独通知，避免同一订单重复推送
+            const gift = !row.commissionBaseCents && !row.commissionCents
+            if (notifyUser && recent && !gift && existing?.status !== row.status) {
               const kind = orderEventKind(existing?.status, row.status)
               if (kind)
                 events.push({
@@ -285,6 +287,13 @@ async function processOrderStep(): Promise<boolean> {
                 },
               },
             })
+          }
+          // 同一订单号的其他订单行（赠品、凑单商品等）未关联时，跟随已关联的订单行归属同一用户；
+          // 订单行之间用户不一致时不处理，留待人工核对
+          for (const orderId of new Set(page.rows.map((r) => r.orderId))) {
+            const where = { platform: plugin.id, accountId: plugin.accountId, externalOrderId: orderId }
+            const owners = await tx.affiliateOrder.findMany({ where: { ...where, userId: { not: null } }, select: { userId: true }, distinct: ['userId'], take: 2 })
+            if (owners.length === 1) await tx.affiliateOrder.updateMany({ where: { ...where, userId: null }, data: { userId: owners[0].userId } })
           }
         },
         { timeout: 30000 },
