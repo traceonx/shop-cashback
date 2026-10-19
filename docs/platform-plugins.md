@@ -58,7 +58,7 @@
 - 代码：`apps/server/src/platforms/taobao/orders.ts`。官方 `taobao.tbk.order.details.get`：最近一小时用 `query_type=4`（更新时间），历史回补用 `query_type=1`（创建时间）；单窗口 3 小时；第 2 页起回传上一页的 `position_index`（按窗口暂存在内存，进程重启后不带位点继续）；`order_scene=1` 常规订单。
 - 官方返回错误码 11（未开通订单权限）时，1 小时内直接改用喵有券 [tbkOrderDetailsGet](https://www.ecapi.cn/index/index/openapi/id/83.shtml?ptype=1)（付费会员接口，字段与官方一致，需「淘宝联盟 · 喵有券」的 apkey 与 tbname，开关可不开；淘宝授权 30 天有效）。
 - 映射：订单号 `trade_parent_id`，订单行 `trade_id`（TOP 响应按原文解析，超过 2^53 的整数保留为字符串）；状态 12 已付款、13 已失效、14 确认收货、3 已结算；佣金 13 记 0、3 取 `pub_share_fee`、其余取 `pub_share_pre_fee`；付款金额 `alipay_total_price`；下单时间 `tk_create_time`（北京时间），结算时间 `tk_earning_time`。
-- 用户归属：尚未接入渠道 ID（relation_id）/ 会员运营 ID（special_id），订单没有可靠的用户标识；淘宝转链记录也不存商品 ID，按商品兜底不会命中。订单全部进入「未关联用户」，在后台手动关联，不推送订单通知。接入渠道备案后改按 relation_id 归属。
+- 用户归属：尚未接入渠道 ID（relation_id）/ 会员运营 ID（special_id），订单没有可靠的用户标识。按商品兜底：转链记录保存新版商品 ID（混合转链）与联盟完整标题，订单按 `item_id` 或完整 `item_title` 匹配，下单前 7 天内只有一个用户转过才关联；匹配不上的进入「未关联用户」手动关联。按商品匹配有分享链接误归属等风险，接入渠道备案后改按 relation_id 归属。
 - 后台：订单管理拆为「京东订单」「淘宝订单」子菜单（`/orders/jd`、`/orders/taobao`），`GET /orders?platform=`、`GET /orders/sync-status?platform=`、`POST /orders/sync {platform, hours}` 按平台；不传 platform 时同步所有已配置的联盟。
 
 ## 验证

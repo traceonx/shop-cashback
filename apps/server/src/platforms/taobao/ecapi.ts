@@ -152,6 +152,8 @@ export async function tbHybridConvert(
     link: link!,
     snapshot: {
       product: found?.title || title || '淘宝商品',
+      // 新版商品 ID，用于订单按商品匹配下单用户
+      sku: newId || undefined,
       price: found?.price ?? null,
       imageUrl: found?.image ?? null,
       commission: found?.commission ?? null,

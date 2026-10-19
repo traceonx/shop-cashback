@@ -311,6 +311,8 @@ export const taobaoPlugin: PlatformPlugin = {
       if (found.status !== 'ok' || !found.url) throw new BadRequestException(`商品${label}暂无法转链：物料搜索未找到该商品${why()}`)
       converted = { error: null, url: found.url, password: null, coupon: found.coupon, commission: found.commission }
       if (found.finalPrice != null && info.finalPrice == null) info.finalPrice = found.finalPrice
+      // 用联盟返回的完整商品标题（分享标题常被截短），订单按标题匹配用户时才能对上
+      if (found.title) info.title = found.title
       if (info.price == null) info.price = found.price
       if (!info.image) info.image = found.image
       shop = found.shop

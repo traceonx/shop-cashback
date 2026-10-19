@@ -141,7 +141,8 @@ test('详情接口失败时用分享文案标题走物料搜索', async () => {
     }
     const r = await taobaoPlugin.convert({ appKey: 'k', appSecret: 's', pid: 'mm_1_2_3', adzoneId: '3' }, 'https://item.taobao.com/item.htm?id=778899', undefined, '【淘宝】https://e.tb.cn/h.x CZ321 「Mistine蜜丝婷小果泥唇霜果汁唇釉」')
     assert.equal(r.link, 'https://s.click.taobao.com/ok')
-    assert.equal(r.snapshot.product, 'Mistine蜜丝婷小果泥唇霜果汁唇釉')
+    // 匹配成功后展示联盟返回的完整标题（订单按完整标题匹配用户）
+    assert.equal(r.snapshot.product, 'Mistine蜜丝婷小果泥唇霜果汁唇釉唇泥雾面口红学生')
   } finally {
     globalThis.fetch = original
   }

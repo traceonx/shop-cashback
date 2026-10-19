@@ -225,7 +225,7 @@ async function processOrderStep(): Promise<boolean> {
               ? tracking!.userId
               : existing?.userId
                 ? null
-                : await ownerBySku(tx, plugin.accountId, row.sku, row.placedAt)
+                : await ownerBySku(tx, plugin.accountId, row.sku, row.placedAt, plugin.id === 'taobao' ? row.title : undefined)
             if (owner && existing?.userId && owner !== existing.userId)
               throw new BadRequestException('订单用户标识冲突，已停止同步，请人工核对')
             const key = {
