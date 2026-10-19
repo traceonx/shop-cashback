@@ -4,6 +4,7 @@ import { readConfig } from './integrations'
 import { platform, listPlatforms } from './platforms/registry'
 import { notifyOrder, type OrderEvent } from './wecom'
 import { ownerBySku } from './attribution'
+import { dbPositionStore } from './platforms/jd/positions'
 import { ownerByTaobaoProduct } from './attribution-taobao'
 
 type Cursor = {
@@ -215,6 +216,14 @@ async function processOrderStep(): Promise<boolean> {
                   },
                 })
               : null
+            // 京东用户独立推广位：订单推广位 ID 绑定的用户，且该用户确实在京东转过链
+            const positionUser =
+              !promotion && plugin.id === 'jd' && row.positionId ? await dbPositionStore(tx).owner(row.positionId) : null
+            const positionOwner =
+              positionUser &&
+              (await tx.promotionRecord.findFirst({ where: { accountId: plugin.accountId, userId: positionUser, status: 'SUCCESS' }, select: { id: true } }))
+                ? positionUser
+                : null
             const existing = await tx.affiliateOrder.findUnique({
               where: {
                 platform_accountId_externalOrderId_externalLineId: {
@@ -229,14 +238,16 @@ async function processOrderStep(): Promise<boolean> {
             // 优先用联盟回传的用户标识；未回传时按「下单前谁转过这个商品」匹配，仅唯一时关联
             const owner = promotion
               ? tracking!.userId
-              : existing?.userId
+              : positionOwner && !existing?.userId
+                ? positionOwner
+                : existing?.userId
                 ? null
                 : plugin.id === 'taobao'
                   ? taobaoMatch
                     ? await ownerByTaobaoProduct(tx, plugin.accountId, row.sku, row.title, row.placedAt)
                     : null
                   : await ownerBySku(tx, plugin.accountId, row.sku, row.placedAt)
-            const attribution = owner ? (promotion ? 'TRACKING' : 'PRODUCT') : undefined
+            const attribution = owner ? (promotion || positionOwner ? 'TRACKING' : 'PRODUCT') : undefined
             if (owner && existing?.userId && owner !== existing.userId)
               throw new BadRequestException('订单用户标识冲突，已停止同步，请人工核对')
             const key = {

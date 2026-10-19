@@ -7,6 +7,7 @@ import { ECAPI_KIND, ecapiConfigured, ecapiFields, ecapiTest } from './platforms
 import { TB_ECAPI_KIND, tbEcapiConfigured, tbEcapiFields, tbEcapiTest } from './platforms/taobao/ecapi'
 import { normalizePublicUrl } from './platforms/taobao/oauth'
 import { orderSourceOf } from './platforms/taobao/orders'
+import { parsePositionPool } from './platforms/jd/positions'
 import { TAOBAO_ACCOUNT, isAdzoneCode, parseAdzonePool } from './platforms/taobao/adzones'
 
 /** 第三方接入（喵有券）：不属于联盟平台账号，独立配置并用开关启用 */
@@ -82,7 +83,7 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
   for (const [key, , secret] of configFields(kind)) {
     const value = (body as Config)[key]
     if (value === undefined) continue
-    if (typeof value !== 'string' || value.length > (key === 'adzonePool' ? 10000 : 2000)) throw new BadRequestException(`${key} 格式无效`)
+    if (typeof value !== 'string' || value.length > (key === 'adzonePool' || key === 'positionPool' ? 10000 : 2000)) throw new BadRequestException(`${key} 格式无效`)
     if (secret && !value.trim()) continue
     next[key] = value.trim()
   }
@@ -98,6 +99,17 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
     throw new BadRequestException('启用状态无效')
   if ((kind === 'jd' || kind === ECAPI_KIND) && next.positionId && !/^\d+$/.test(next.positionId))
     throw new BadRequestException('推广位 ID 必须为数字')
+  if (kind === 'jd') {
+    const jdEcapi = await readConfig(ECAPI_KIND)
+    next.positionPool = parsePositionPool(next.positionPool, [next.positionId, jdEcapi.positionId], true).join('\n')
+    // 已绑定用户的推广位不能从池里移除，否则后台看不到绑定关系（订单仍按绑定关联）
+    const kept = new Set(parsePositionPool(next.positionPool, []))
+    const removed = parsePositionPool(previous.positionPool, []).filter((id) => !kept.has(id))
+    if (removed.length) {
+      const bound = await db.systemConfig.findMany({ where: { key: { in: removed.map((id) => `jd-position:${id}`) } }, select: { key: true } })
+      if (bound.length) throw new BadRequestException(`推广位 ${bound.map((b) => b.key.slice(12)).join('、')} 已绑定用户，不能从推广位池移除`)
+    }
+  }
   if (kind === 'taobao') {
     if (next.orderSource && !['official-sc', 'official', 'ecapi'].includes(next.orderSource)) throw new BadRequestException('订单数据源无效')
     if (next.autoMatch && !['true', 'false'].includes(next.autoMatch)) throw new BadRequestException('自动关联开关无效')

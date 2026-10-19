@@ -4,6 +4,7 @@ import { Alert, Button, Loading, Modal, Switch, TextField } from '../ui'
 import { dateTime } from '../lib/format'
 import { ProviderTile, useIntegration, type IntegrationKind } from './integration'
 import { TaobaoOrderPanel } from './TaobaoOrderPanel'
+import { JdPositionPanel } from './JdPositionPanel'
 
 type Affiliate = Exclude<IntegrationKind, 'wecom' | 'jd-ecapi' | 'taobao-ecapi'>
 const meta: Record<
@@ -22,7 +23,7 @@ const meta: Record<
       { key: 'positionId', hint: '推广位 ID', icon: Tag },
       { key: 'siteId', hint: '网站 / APP 媒体 ID，仅转链使用', icon: Store },
     ],
-    steps: ['只需应用凭证，不收集京东登录密码', '订单查询只需 AppKey 与 AppSecret', '订单归属未核实前不会自动入账返现'],
+    steps: ['只需应用凭证，不收集京东登录密码', '订单查询只需 AppKey 与 AppSecret', '订单归属未核实前不会自动入账返现', '填写推广位池后每个用户固定使用一个推广位，订单按推广位精确关联用户'],
   },
   taobao: {
     name: '淘宝联盟',
@@ -35,7 +36,7 @@ const meta: Record<
       { key: 'pid', hint: '完整 PID，如 mm_1_2_3，保存时自动提取推广位 ID', icon: Tag },
       { key: 'adzoneId', hint: '由 PID 自动提取', icon: Hash, readOnly: true },
     ],
-    steps: ['未开通万能转链时自动按分享标题搜索转链', '同名商品多家店铺在卖时不转链，避免串店', '订单数据源需明确选择（官方账号授权 / 官方推广者 / 喵有券），系统不会自动切换；账号授权不能代替接口权限', '淘宝订单没有联盟回传的用户标识：按商品唯一匹配时自动关联并标注「按商品匹配」，多人转过同一商品时进入「未关联用户」人工关联'],
+    steps: ['未开通万能转链时自动按分享标题搜索转链', '同名商品多家店铺在卖时不转链，避免串店', '订单数据源需明确选择（官方账号授权 / 官方推广者 / 喵有券），系统不会自动切换；账号授权不能代替接口权限', '每个用户独立推广位时订单按推广位精确关联；用默认推广位的订单按商品唯一匹配时自动关联并标注「按商品匹配」，多人转过同一商品时进入「未关联用户」人工关联'],
   },
 }
 
@@ -114,6 +115,7 @@ function AffiliateCard({ kind }: { kind: Affiliate }) {
                   )
                 })}
               </div>
+              {kind === 'jd' && <JdPositionPanel it={it} />}
               {kind === 'taobao' && <TaobaoOrderPanel it={it} />}
               {it.error && <Alert tone="error">{it.error}</Alert>}
               {it.notice && <Alert tone="success">{it.notice}</Alert>}

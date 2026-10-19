@@ -7,6 +7,7 @@ import { readConfig } from './integrations'
 import { platformForContent, platform } from './platforms/registry'
 import { ECAPI_KIND, ecapiConvert, ecapiEnabled } from './platforms/jd/ecapi'
 import { TB_ECAPI_KIND, tbEcapiEnabled, tbHybridConvert } from './platforms/taobao/ecapi'
+import { dbPositionStore, ensureUserPosition, parsePositionPool } from './platforms/jd/positions'
 import { dbAdzoneStore, ensureUserAdzone, perUserAdzoneEnabled, userPid } from './platforms/taobao/adzones'
 
 export async function settings() {
@@ -130,7 +131,24 @@ export async function convert(content: string, actor: string, trace: string, use
     } catch (e) {
       notices.push(`用户专属推广位分配失败，已使用默认推广位：${(e as Error).message}`)
     }
-  } else if (userId && plugin.id !== 'taobao') {
+  }
+  // 京东：每个用户用推广位池里固定绑定的推广位转链，订单的 positionId 即可关联用户；池里没有空闲推广位时用默认推广位
+  let thirdConf = third
+  if (userId && plugin.id === 'jd') {
+    const pool = parsePositionPool(c.positionPool, [c.positionId, third?.positionId])
+    if (pool.length) {
+      try {
+        const positionId = await ensureUserPosition(dbPositionStore(), pool, userId)
+        if (positionId) {
+          conf = { ...c, positionId }
+          if (third) thirdConf = { ...third, positionId }
+        } else notices.push('京东推广位池已用完，已使用默认推广位')
+      } catch (e) {
+        notices.push(`用户专属推广位分配失败，已使用默认推广位：${(e as Error).message}`)
+      }
+    }
+  }
+  if (userId && plugin.id !== 'taobao') {
     const tracking = await db.userTrackingCode.upsert({
       where: { accountId_userId: { accountId: plugin.accountId, userId } },
       create: { accountId: plugin.accountId, userId, code: randomBytes(16).toString('hex') },
@@ -152,7 +170,7 @@ export async function convert(content: string, actor: string, trace: string, use
     const { link, snapshot } = !useThird
       ? await plugin.convert(conf, url, trackingCode || undefined, content)
       : plugin.id === 'jd'
-        ? await ecapiConvert(third!, url, trackingCode || undefined)
+        ? await ecapiConvert(thirdConf!, url, trackingCode || undefined)
         : await tbHybridConvert(conf, third!, url, content)
     if (notices.length) snapshot.infoMessage = [...notices, snapshot.infoMessage].filter(Boolean).join('；')
     const rule = userId ? await db.rebateRule.findFirst({ where: { scopeKey: 'user:' + userId } }) : null

@@ -174,6 +174,7 @@ export function normalizeOrder(raw: any): PlatformOrder {
   if (amount === null || !placedAt) throw new BadRequestException('订单金额或时间格式无法确认，已停止导入')
   return {
     trackingCode: typeof raw.subUnionId === 'string' && /^[a-f0-9]{32}$/.test(raw.subUnionId) ? raw.subUnionId : null,
+    positionId: /^[1-9]\d{0,19}$/.test(String(raw.positionId ?? '')) ? String(raw.positionId) : null,
     status: jdOrderStatus(String(raw.validCode)),
     orderId: String(raw.orderId),
     lineId: String(raw.id),
@@ -241,6 +242,7 @@ export const jdPlugin: PlatformPlugin = {
     ['unionId', '联盟 ID', false],
     ['siteId', '网站 / APP / 流量媒体 ID（siteId，仅转链需要）', false],
     ['positionId', '推广位 ID（可选）', false],
+    ['positionPool', '推广位池（用户独立推广位）', false],
   ],
   maxHistoryDays: 90,
   maxWindowMs: 3600000,

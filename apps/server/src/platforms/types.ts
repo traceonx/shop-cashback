@@ -3,6 +3,8 @@ export type ConfigField = readonly [key: string, label: string, secret: boolean]
 export type PlatformOrderStatus = 'CANCELLED' | 'CREATED' | 'PAID' | 'COMPLETED' | 'UNATTRIBUTED'
 export interface PlatformOrder {
   trackingCode: string | null
+  /** 订单推广位 ID（京东 positionId），用户独立推广位时据此关联用户 */
+  positionId?: string | null
   status: PlatformOrderStatus
   orderId: string
   lineId: string

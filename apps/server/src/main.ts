@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { adzoneBindings } from './platforms/taobao/adzones'
+import { parsePositionPool, positionBindings } from './platforms/jd/positions'
 import { AppLogger, readLogs, logText } from './logs'
 import './config'
 import { NestFactory } from '@nestjs/core'
@@ -379,6 +380,9 @@ class AdminController {
         maxHistoryDays: p.maxHistoryDays,
       })),
     }
+  }
+  @Get('integrations/jd/positions') async jdPositions() {
+    return { data: await positionBindings(parsePositionPool((await readConfig('jd')).positionPool, [])) }
   }
   @Get('integrations/taobao/adzones') async taobaoAdzones() {
     return { data: await adzoneBindings(await readConfig('taobao')) }

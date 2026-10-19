@@ -25,6 +25,7 @@
 - 流程：[商品查询 getJdUnionItems](https://www.ecapi.cn/index/index/openapi/id/51.shtml?ptype=2)（`sceneId=2`，可直接传 3.cn 短链）→ 选券 → [转链 doItemCpsUrl](https://www.ecapi.cn/index/index/openapi/id/56.shtml?ptype=2)。有单件可用的最优券时生成含券链接（materialId 改为商品详情页链接并传 couponUrl），含券失败退回普通链接并提示；无可用券时传 `autoSearch=1`。券门槛全部高于单件售价时按无券计算到手价与佣金。返回的推广链接只接受 u.jd.com、3.cn、union-click.jd.com。
 - 订单：喵有券使用你授权给它的京东联盟账号，推广订单归属该账号，由官方 `order.row.query` 同步，所以必须保留官方 AppKey / AppSecret。喵有券订单接口（需授权 key，曾返回 1038）不使用。
 - 用户归属：转链时会传 subUnionId，但需在喵有券另行申请（官方要求开通后两个月内日均 500 单），未开通会被忽略，订单继续按「7 天内只有一个用户转过该商品」匹配。
+- 用户独立推广位（京东官方与喵有券转链都适用，`platforms/jd/positions.ts`）：在京东联盟后台「推广管理 → 推广位」建好推广位后，把推广位 ID 填进京东联盟配置的「推广位池」（`positionPool`，数字，每行一个，不能包含默认推广位）。用户首次转京东链接时固定绑定第一个空闲推广位，之后转链都传该 `positionId`；订单行的 `positionId` 对应到绑定用户，且该用户有过成功转链时按联盟标识关联（TRACKING），不需要 subUnionId 权限。绑定保存在 `system_configs`（`jd-position:<推广位>`、`jd-position-user:<用户>` 成对写入，主键唯一防并发重复），不回收；已绑定的推广位不能从池里移除。池子用完时用默认推广位并在转链结果提示，订单按商品匹配。后台显示每个推广位绑定的用户（`GET /api/v1/integrations/jd/positions`）。优先级：subUnionId → 推广位 → 已有归属 → 按商品匹配。
 - 网络：喵有券按调用方公网出口 IP 白名单校验，未加白名单返回错误码 401。设置了 `PROXY_HOST` 时，喵有券请求（京东、淘宝都是）经该代理发出，白名单填代理节点的出口 IP。家用 NAS 没有固定公网 IP 时，在 mihomo 中把 `ecapi.cn` 分流到固定出口 IP 的节点（如 `DOMAIN-SUFFIX,ecapi.cn,固定IP节点`）；若规则走 DIRECT，出口仍是家庭宽带 IP，白名单仍会失效。401 报错会提示当前是直连还是经代理。经代理请求失败时自动直连重试一次。后台头像菜单「出口 IP 查询」（`GET /system/egress-ip`）可查看直连与经代理的出口 IP；经代理结果取决于 IP 查询服务（ipw.cn 等）的分流，与 ecapi.cn 同节点时才等于喵有券看到的 IP。
 - 测试：「测试接口」用关键词查询一次商品，验证 apkey、key_id 与 IP 白名单。
 
