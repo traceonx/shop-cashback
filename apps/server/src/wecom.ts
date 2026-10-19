@@ -71,6 +71,8 @@ export async function receiveCallback(query: Record<string, string>, body: strin
     update: {},
   })
 }
+/** 卡片里只显示口令本体（如 ￥AbC123￥），完整口令单独发一条便于复制 */
+export const shortTpwd = (text: string) => /([￥$€¥₤₳₴₰¢₵₲₭₸₱₣₿()\/])[A-Za-z0-9]{6,}\1/u.exec(text)?.[0] || text.trim().slice(0, 40)
 type News = { title: string; description: string; url: string; picurl?: string; followup?: string }
 // 按 UTF-8 字节截断（企业微信图文：标题 ≤128 字节，描述 ≤512 字节）
 function clip(text: string, bytes: number) {
@@ -326,13 +328,15 @@ export async function processInbox() {
               p.finalPrice != null ? `预计到手：${yuan(p.finalPrice)}` : null,
               `预计返现：${p.rebate != null ? yuan(p.rebate) : '待确认'}`,
               !known && p.infoMessage ? `商品信息未获取：${p.infoMessage}` : null,
-              p.password ? `淘口令：${p.password}` : null,
+              p.password ? `淘口令：${shortTpwd(p.password)}` : null,
               `👉 点击链接购买：${p.promotionUrl}`,
             ].filter(Boolean).join('\n'),
             url: p.promotionUrl,
             picurl: p.imageUrl || undefined,
             // 淘口令单独发一条文本，方便长按复制后打开手机淘宝
-            followup: p.password ? `${p.password} 复制这条消息，打开手机淘宝即可领券购买` : undefined,
+            // 发完整口令（含 数字:/ 前缀和链接），整条复制后打开手淘才会弹出商品
+            // 口令识别失败时，同一条消息里的短链也能被手淘识别或直接点开
+            followup: p.password ? `${/打开|复制/.test(p.password) ? p.password : `${p.password} 复制这条消息，打开手机淘宝即可领券购买`}\n${p.promotionUrl}` : undefined,
           }
         } catch (e) {
           reply = e instanceof Error ? e.message : '转链失败，请稍后重试。'

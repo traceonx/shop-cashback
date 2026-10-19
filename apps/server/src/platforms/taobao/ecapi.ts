@@ -64,7 +64,9 @@ async function promote(t: PlatformConfig, official: PlatformConfig, material: st
     const id = rowsOf(parsed, 'data')[0]?.link_info_dto?.material_id
     if (isNewId(id)) newId = String(id)
   }
-  return { url, tpwd, newId }
+  // 完整口令（含 数字:/ 前缀与链接）在新版手淘里识别率更高，短口令 ￥xxx￥ 常常不弹窗
+  const fullTpwd: string | null = link.coupon_full_tpwd || link.cps_full_tpwd || tpwd
+  return { url, tpwd, fullTpwd, newId }
 }
 
 /** 步骤 3：官方物料搜索按新版 ID 精确命中 */
@@ -128,7 +130,7 @@ export async function tbHybridConvert(
   } else if (p?.url) {
     // 官方未命中：用喵有券推广链接兜底，价格和佣金口径不同，不展示预计返现
     link = p.url
-    password = p.tpwd
+    password = p.fullTpwd
     notices.push('未取到官方价格与佣金，已使用喵有券推广链接')
   } else throw new BadRequestException(`商品${title ? `「${title}」` : ''}暂无法转链${notices.length ? `（${notices.join('；')}）` : ''}`)
   // 官方物料链接很长，转成 s.click.taobao.com 短链；官方转短链不可用时用喵有券的推广短链（同一 PID）
@@ -139,7 +141,7 @@ export async function tbHybridConvert(
   if (!password) {
     try {
       const r = await topRequest(official, 'taobao.tbk.tpwd.create', { url: link })
-      password = r?.data?.password_simple || null
+      password = r?.data?.model || r?.data?.password_simple || null
     } catch (e) {
       notices.push(`淘口令：${(e as Error).message}`)
     }

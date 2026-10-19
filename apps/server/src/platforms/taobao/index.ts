@@ -222,7 +222,8 @@ export function parseConvert(resp: any) {
   return {
     error: row.code && String(row.code) !== '0' ? `${row.code} ${row.msg || ''}`.trim() : row.msg && !link.cps_short_url && !link.coupon_short_url ? String(row.msg) : null,
     url: https(link.coupon_short_url || link.cps_short_url || link.coupon_long_url || link.cps_long_url),
-    password: link.coupon_short_tpwd || link.cps_short_tpwd || null,
+    // 优先完整口令（新版手淘对短口令 ￥xxx￥ 常不识别）
+    password: link.coupon_full_tpwd || link.cps_full_tpwd || link.coupon_short_tpwd || link.cps_short_tpwd || null,
     coupon: decimalCents(row.coupon_info_dto?.coupon_amount),
     commission: decimalCents(row.income_info?.pure_commission_amount),
   }
@@ -314,7 +315,7 @@ export const taobaoPlugin: PlatformPlugin = {
     if (!password) {
       try {
         const t = await topRequest(c, 'taobao.tbk.tpwd.create', { url: promoUrl })
-        password = t?.data?.password_simple || null
+        password = t?.data?.model || t?.data?.password_simple || null
       } catch (e) {
         notices.push(`淘口令：${(e as Error).message}`)
       }
