@@ -196,7 +196,7 @@ export async function listOrders(platformId?: string) {
       platform: ({ jd: '京东', taobao: '淘宝', pdd: '拼多多' } as Record<string, string>)[o.platform] || o.platform,
       user: o.user?.name || '未关联用户',
       userId: o.userId || '',
-      attribution: o.userId ? '已关联' : '未关联',
+      attribution: o.userId ? (({ TRACKING: '联盟标识', PRODUCT: '按商品匹配', SIBLING: '同订单关联', MANUAL: '人工关联' }) as Record<string, string>)[o.attribution || ''] || '已关联' : '未关联',
       amount: centsNumber(o.amountCents) ?? values.amount,
       commissionBase: values.commissionBase,
       paidAmount: values.commissionBase ?? centsNumber(o.paidAmountCents),

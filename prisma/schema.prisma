@@ -198,6 +198,8 @@ model AffiliateOrder {
   externalLineId  String
   userId          String?
   user            User?               @relation(fields: [userId], references: [id])
+  /// 用户归属方式：TRACKING 联盟回传标识 / PRODUCT 按商品匹配 / SIBLING 同订单其他行 / MANUAL 人工关联
+  attribution     String?
   status          OrderStatus         @default(UNATTRIBUTED)
   rawStatus       String
   rawData         Json

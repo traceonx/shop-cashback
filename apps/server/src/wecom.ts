@@ -122,6 +122,8 @@ export type OrderEvent = {
   commissionCents: number | null
   imageUrl?: string | null
   url?: string | null
+  /** 按商品匹配关联的订单（无联盟回传标识），提醒用户核对 */
+  matched?: boolean
 }
 const platformName: Record<string, string> = { jd: '京东', taobao: '淘宝' }
 const orderHead = {
@@ -147,6 +149,7 @@ export function orderNews(e: OrderEvent, rebate: number, total: number): News {
     !cancelled && e.amountCents ? `付款金额：${yuan(e.amountCents)}` : null,
     cancelled ? null : `本单返现：${yuan(rebate)}`,
     `累计返利：${yuan(total)}`,
+    e.matched ? '按你转过的商品自动匹配，如不是你的订单请回复说明' : null,
   ].filter(Boolean)
   return {
     title: orderHead[e.kind],

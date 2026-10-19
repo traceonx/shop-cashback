@@ -317,7 +317,7 @@ class AdminController {
     await db.$transaction([
       db.affiliateOrder.updateMany({
         where: { platform: order.platform, accountId: order.accountId, externalOrderId: order.externalOrderId },
-        data: { userId },
+        data: { userId, attribution: userId ? 'MANUAL' : null },
       }),
       db.auditLog.create({
         data: { actorId: req.actor!.id, action: userId ? '手动关联订单用户' : '取消订单关联', targetId: order.externalOrderId, traceId: req.traceId!, diff: { from: order.userId, to: userId } },

@@ -35,7 +35,6 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
       ['createdAt', '下单时间'],
       ['settlement', '结算'],
       ['settledAt', '佣金结算时间'],
-      ['completedAt', '完成时间', true],
       ['externalOrderId', '订单号', true],
     ],
   },
@@ -103,6 +102,14 @@ function cell(kind: RecordKind, key: string, r: Row) {
       </div>
     )
   if (key === 'ratio') return v == null ? '待确认' : <span title={String(r.ratioNote || '')}>{String(v)}%</span>
+  // 订单的返现用户：标出归属方式，按商品匹配等非联盟标识的关联便于核对
+  if (kind === 'orders' && key === 'user' && r.userId && r.attribution && r.attribution !== '联盟标识')
+    return (
+      <div>
+        {String(v)}
+        <small className="cell-sub">{String(r.attribution)}</small>
+      </div>
+    )
   if (v == null || v === '')
     return (
       <span className="text-faint">

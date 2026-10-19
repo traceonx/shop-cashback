@@ -660,3 +660,9 @@
   align-items: center;
   gap: 8px;
 }
+
+.cell-sub {
+  display: block;
+  color: var(--c-text-3);
+  font-size: 12px;
+}

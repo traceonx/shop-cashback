@@ -4,6 +4,7 @@ import { readConfig } from './integrations'
 import { platform, listPlatforms } from './platforms/registry'
 import { notifyOrder, type OrderEvent } from './wecom'
 import { ownerBySku } from './attribution'
+import { ownerByTaobaoProduct } from './attribution-taobao'
 
 type Cursor = {
   engine: 'platform-v1'
@@ -196,6 +197,8 @@ async function processOrderStep(): Promise<boolean> {
             },
           })
           if (!held.count) return
+          // 淘宝按商品匹配下单用户：渠道配置开关，默认开启
+          const taobaoMatch = plugin.id === 'taobao' && (await readConfig('taobao')).autoMatch !== 'false'
           for (const row of page.rows) {
             const tracking = row.trackingCode
               ? await tx.userTrackingCode.findUnique({
@@ -221,7 +224,7 @@ async function processOrderStep(): Promise<boolean> {
                   externalLineId: row.lineId,
                 },
               },
-              select: { userId: true, status: true },
+              select: { userId: true, status: true, attribution: true },
             })
             // 优先用联盟回传的用户标识；未回传时按「下单前谁转过这个商品」匹配，仅唯一时关联
             const owner = promotion
@@ -229,8 +232,11 @@ async function processOrderStep(): Promise<boolean> {
               : existing?.userId
                 ? null
                 : plugin.id === 'taobao'
-                  ? null // 淘宝订单没有经过验证的用户标识，不按商品 / 标题猜测，进入待关联人工核验
+                  ? taobaoMatch
+                    ? await ownerByTaobaoProduct(tx, plugin.accountId, row.sku, row.title, row.placedAt)
+                    : null
                   : await ownerBySku(tx, plugin.accountId, row.sku, row.placedAt)
+            const attribution = owner ? (promotion ? 'TRACKING' : 'PRODUCT') : undefined
             if (owner && existing?.userId && owner !== existing.userId)
               throw new BadRequestException('订单用户标识冲突，已停止同步，请人工核对')
             const key = {
@@ -240,7 +246,7 @@ async function processOrderStep(): Promise<boolean> {
               externalLineId: row.lineId,
             }
             const common = {
-              ...(owner ? { userId: owner } : {}),
+              ...(owner ? { userId: owner, attribution } : {}),
               status: row.status,
               rawStatus: row.rawStatus,
               rawData: json(row.raw),
@@ -252,14 +258,18 @@ async function processOrderStep(): Promise<boolean> {
             const recent = Date.now() - row.placedAt.getTime() < (existing ? 30 : 2) * 86400000
             // 金额和佣金都为 0 的订单行（赠品、非卖品）不单独通知，避免同一订单重复推送
             const gift = !row.commissionBaseCents && !row.commissionCents
-            if (notifyUser && recent && !gift && existing?.status !== row.status) {
-              const kind = orderEventKind(existing?.status, row.status)
+            // 新关联上用户的订单（如先入库、后匹配到用户）即使状态没变也要通知一次
+            const newlyOwned = !!owner && !existing?.userId
+            if (notifyUser && recent && !gift && (newlyOwned || existing?.status !== row.status)) {
+              const kind = orderEventKind(newlyOwned ? undefined : existing?.status, row.status)
               if (kind)
                 events.push({
                   userId: notifyUser,
                   kind,
                   platform: plugin.id,
                   title: row.title,
+                  // 按商品匹配的订单提醒用户核对
+                  matched: (attribution ?? existing?.attribution) === 'PRODUCT',
                   // 付款金额：优先联盟的计佣金额，未付款时为 0 则用单价 × 数量
                   amountCents: row.commissionBaseCents || plugin.orderAmounts(row.raw).amount || null,
                   commissionCents: row.commissionCents,
@@ -298,7 +308,7 @@ async function processOrderStep(): Promise<boolean> {
           for (const orderId of new Set(page.rows.map((r) => r.orderId))) {
             const where = { platform: plugin.id, accountId: plugin.accountId, externalOrderId: orderId }
             const owners = await tx.affiliateOrder.findMany({ where: { ...where, userId: { not: null } }, select: { userId: true }, distinct: ['userId'], take: 2 })
-            if (owners.length === 1) await tx.affiliateOrder.updateMany({ where: { ...where, userId: null }, data: { userId: owners[0].userId } })
+            if (owners.length === 1) await tx.affiliateOrder.updateMany({ where: { ...where, userId: null }, data: { userId: owners[0].userId, attribution: 'SIBLING' } })
           }
         },
         { timeout: 30000 },

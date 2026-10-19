@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Copy, Globe, KeyRound, Link2, RefreshCw, ShieldCheck, Unlink } from 'lucide-react'
 import { api } from '../lib/api'
 import { dateTime, errorText } from '../lib/format'
-import { Alert, Button, Chip, Select, SplitButton, TextField, confirm } from '../ui'
+import { Alert, Button, Chip, Select, SplitButton, Switch, TextField, confirm } from '../ui'
 import type { useIntegration } from './integration'
 
 type Source = 'official-sc' | 'official' | 'ecapi'
@@ -136,6 +136,14 @@ export function TaobaoOrderPanel({ it }: { it: ReturnType<typeof useIntegration>
         options={sources}
         onChange={(v) => it.set('orderSource', v)}
       />
+      <Switch
+        label="按商品自动关联下单用户"
+        checked={it.values.autoMatch !== 'false'}
+        onChange={(v) => it.set('autoMatch', v ? 'true' : 'false')}
+      />
+      <small className="text-faint">
+        淘宝订单没有联盟回传的用户标识：下单前 7 天内（含下单后 10 分钟）只有一个用户转过同一商品，且商品 ID 或完整标题一致时自动关联，订单标注「按商品匹配」，通知提醒用户核对；多人可能转过同一商品时不关联，需人工关联。分享出去的链接被他人下单无法识别。
+      </small>
       {source === 'official-sc' && (
         <>
           <div className="grid-2">
