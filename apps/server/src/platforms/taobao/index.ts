@@ -6,7 +6,8 @@ import { decimalCents, parseJdJson } from '../jd'
 import type { PlatformConfig, PlatformPlugin } from '../types'
 import { dateText } from '../../database'
 import { taobaoFields } from './config'
-import { queryTaobaoOrders, taobaoOrderAmounts, taobaoOrderImage, taobaoOrderSettlement, taobaoOrderStatus } from './orders'
+import { queryTaobaoOrders, taobaoOrderAmounts, taobaoOrderImage, taobaoOrderSettlement, taobaoOrderStatus, orderSourceOf, type OrderDeps } from './orders'
+import { dbOAuthStore, markInvalid, usableSession } from './oauth'
 
 const GATEWAY = 'https://eco.taobao.com/router/rest'
 const HOSTS = ['taobao.com', 'tmall.com', 'tmall.hk', 'tb.cn', 'yao.95095.com', 'liangxinyao.com']
@@ -26,11 +27,15 @@ const topHints: Record<string, string> = {
   '29': 'AppKey 不正确',
   '11': '应用缺少该接口的权限包，请在淘宝联盟开放平台申请',
   '7': '调用频率超限，请稍后重试',
-  '27': '时间戳无效，请检查服务器时间',
+  '26': '缺少授权 session',
+  '27': '授权 session 无效或已过期，请重新授权淘宝账号',
+  '31': '时间戳无效，请检查服务器时间',
 }
-export async function topRequest(c: PlatformConfig, method: string, biz: Record<string, unknown> = {}) {
+/** opts.session：需要用户授权的接口（如 taobao.tbk.sc.order.details.get）传入授权账号的 session，只放在请求体里 */
+export async function topRequest(c: PlatformConfig, method: string, biz: Record<string, unknown> = {}, opts: { session?: string } = {}) {
   if (!c.appKey || !c.appSecret) throw new ServiceUnavailableException('请先在渠道配置中保存淘宝联盟 AppKey 和 AppSecret')
   const params: Record<string, string> = { method, app_key: c.appKey, timestamp: beijingTime(), format: 'json', v: '2.0', sign_method: 'md5' }
+  if (opts.session) params.session = opts.session
   for (const [k, v] of Object.entries(biz)) if (v !== undefined && v !== null && v !== '') params[k] = typeof v === 'string' ? v : JSON.stringify(v)
   params.sign = topSign(params, c.appSecret)
   let response: Response
@@ -238,6 +243,20 @@ export function parseConvert(resp: any) {
 }
 
 
+/** 生产环境的订单依赖：授权 session（加密存储、按需刷新）与喵有券配置 */
+export function orderDeps(c: PlatformConfig): OrderDeps {
+  const store = dbOAuthStore()
+  return {
+    session: () => usableSession(store, c, (official, method, biz) => topRequest(official, method, biz)),
+    onAuthInvalid: (reason) => markInvalid(store, reason),
+    ecapi: async () => {
+      const { readConfig } = await import('../../integrations')
+      const { TB_ECAPI_KIND, tbEcapiConfigured } = await import('./ecapi')
+      const t = await readConfig(TB_ECAPI_KIND)
+      return tbEcapiConfigured(t) ? { apiKey: t.apiKey.trim(), tbname: t.tbname.trim() } : null
+    },
+  }
+}
 export const taobaoPlugin: PlatformPlugin = {
   id: 'taobao',
   name: '淘宝',
@@ -246,7 +265,8 @@ export const taobaoPlugin: PlatformPlugin = {
   authentication: { mode: 'app-credentials', description: '使用淘宝联盟推广者应用 AppKey / AppSecret 与推广位 PID。' },
   fields: taobaoFields,
   maxHistoryDays: 90,
-  maxWindowMs: 3 * 3600000,
+  // 官方日常限制 3 小时、大促 20 分钟，统一按 20 分钟分段，避免大促期间报 2007（时间段超出限制）
+  maxWindowMs: 20 * 60000,
   configured: (c) => !!(c.appKey && c.appSecret && c.pid && c.adzoneId),
   normalizeUrl: extractTaobaoUrl,
   // orders.ts 与本文件互相引用，用箭头函数延迟取值，避免加载顺序导致未定义
@@ -375,5 +395,9 @@ export const taobaoPlugin: PlatformPlugin = {
     const route = convert === '可用' ? '转链方式：万能转链' : search === '可用' ? '转链方式：物料搜索（万能转链为邀约权限，未开通不影响使用）' : '无可用转链权限，需申请「物料搜索」或「万能转链」'
     return `签名与 AppKey 验证通过。商品详情：${detail}；物料搜索：${search}；万能转链：${convert}；淘口令：${tpwd}；长链转短链：${spread}；订单查询：${orders === '可用' ? '可用' : '未开通（将改用喵有券查询，需配置「淘宝联盟 · 喵有券」）'}。${route}`
   },
-  queryOrders: (c, request) => queryTaobaoOrders(c, request),
+  async queryOrders(c, request) {
+    const deps = orderDeps(c)
+    const source = orderSourceOf(c, !!(await deps.ecapi!()))
+    return queryTaobaoOrders({ ...c, orderSource: source }, request, deps)
+  },
 }

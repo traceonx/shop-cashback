@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeTaobaoOrder, queryTaobaoOrders, taobaoOrderAmounts } from './platforms/taobao/orders'
+import { normalizeTaobaoOrder, orderSourceOf, queryTaobaoOrders, taobaoOrderAmounts, TaobaoOrderError } from './platforms/taobao/orders'
 import { taobaoPlugin } from './platforms/taobao'
 
 const c = { appKey: 'k', appSecret: 's', pid: 'mm_1_2_3', adzoneId: '3' }
@@ -33,6 +33,11 @@ test('淘宝订单规范化：长订单号原样保留、北京时间、状态�
   assert.equal(taobaoOrderAmounts({ ...raw, tk_status: 3, pub_share_fee: '2.80' }).commission, 280)
   assert.equal(taobaoPlugin.orderStatus('3'), 'COMPLETED')
   assert.equal(taobaoPlugin.orderSync, undefined)
+  // 接口没有确认收货时间；结算时间与完成时间不混用
+  assert.equal(normalizeTaobaoOrder({ ...raw, tk_status: 3, tk_earning_time: '2026-10-25 10:00:00' }).completedAt, null)
+  // 计佣金额：结算后按结算金额 pay_price
+  assert.equal(taobaoOrderAmounts({ ...raw, tk_status: 3, pay_price: '380.00' }).commissionBase, 38000)
+  assert.equal(taobaoOrderAmounts(raw).commissionBase, 38597)
 })
 
 test('官方订单查询：按更新时间查询、翻页回传位点', async () => {
@@ -52,12 +57,115 @@ test('官方订单查询：按更新时间查询、翻页回传位点', async ()
     assert.equal(p1.hasMore, true)
     assert.equal(p1.rows[0].orderId, '2938475610293847561')
     assert.equal(p1.rows[0].status, 'COMPLETED')
-    const p2 = await queryTaobaoOrders(c, { ...req, page: 2 })
+    assert.equal(p1.position, 'POS1')
+    // 第 2 页的位点由同步任务从游标传入（持久化，重启可恢复）
+    const p2 = await queryTaobaoOrders(c, { ...req, page: 2, position: p1.position })
     assert.equal(p2.hasMore, false)
     assert.equal(seen[0].get('query_type'), '4')
-    assert.equal(seen[0].get('start_time'), '2026-10-19 14:00:00')
+    // 向前重叠 1 分钟
+    assert.equal(seen[0].get('start_time'), '2026-10-19 13:59:00')
     assert.equal(seen[0].get('position_index'), null)
     assert.equal(seen[1].get('position_index'), 'POS1')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+const req = { from: new Date('2026-10-19T06:00:00Z'), until: new Date('2026-10-19T06:20:00Z'), type: 1 as const, page: 1 }
+const okBody = (method: string) =>
+  JSON.stringify({ [`${method.replace(/^taobao\./, '').replaceAll('.', '_')}_response`]: { data: { has_next: false, results: { publisher_order_dto: [order] } } } })
+
+test('官方账号授权：sc 接口携带 session，按创建时间回补', async () => {
+  const original = globalThis.fetch
+  try {
+    let seen: URLSearchParams | null = null
+    globalThis.fetch = async (_u, init) => {
+      seen = init!.body as URLSearchParams
+      return new Response(okBody('taobao.tbk.sc.order.details.get'))
+    }
+    const r = await queryTaobaoOrders({ ...c, orderSource: 'official-sc' }, req, { session: async () => 'sess-123' })
+    assert.equal(r.rows.length, 1)
+    assert.equal(seen!.get('method'), 'taobao.tbk.sc.order.details.get')
+    assert.equal(seen!.get('session'), 'sess-123')
+    assert.equal(seen!.get('query_type'), '1')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('授权失效：标记失效且不重试；无权限：给出接口权限提示', async () => {
+  const original = globalThis.fetch
+  try {
+    let calls = 0
+    const invalid: string[] = []
+    globalThis.fetch = async () => {
+      calls++
+      return new Response(JSON.stringify({ error_response: { code: 27, msg: 'Invalid session', sub_code: 'invalid-sessionkey' } }))
+    }
+    await assert.rejects(
+      queryTaobaoOrders({ ...c, orderSource: 'official-sc' }, req, { session: async () => 's', onAuthInvalid: async (m) => void invalid.push(m) }),
+      (e: unknown) => e instanceof TaobaoOrderError && e.kind === 'AUTH',
+    )
+    assert.equal(calls, 1)
+    assert.equal(invalid.length, 1)
+    globalThis.fetch = async () => new Response(JSON.stringify({ error_response: { code: 11, msg: 'Insufficient isv permissions', sub_code: 'isv.permission-api-package-limit' } }))
+    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'official-sc' }, req, { session: async () => 's' }), /接口权限/)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('限流与超时有上限地退避重试；响应格式异常不当作零订单', async () => {
+  const original = globalThis.fetch
+  const waits: number[] = []
+  const sleep = async (ms: number) => void waits.push(ms)
+  try {
+    let calls = 0
+    globalThis.fetch = async () => {
+      calls++
+      return calls < 3
+        ? new Response(JSON.stringify({ error_response: { code: 7, msg: 'App Call Limited', sub_code: 'accesscontrol.limited-by-app-access-count' } }))
+        : new Response(okBody('taobao.tbk.order.details.get'))
+    }
+    const r = await queryTaobaoOrders({ ...c, orderSource: 'official' }, req, { sleep })
+    assert.equal(r.rows.length, 1)
+    assert.deepEqual(waits, [1000, 3000])
+    calls = 0
+    globalThis.fetch = async () => {
+      calls++
+      throw new Error('timeout')
+    }
+    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'official' }, req, { sleep }), (e: unknown) => e instanceof TaobaoOrderError && e.kind === 'TIMEOUT')
+    assert.equal(calls, 3)
+    globalThis.fetch = async () => new Response(JSON.stringify({ tbk_order_details_get_response: {} }))
+    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'official' }, req, { sleep }), (e: unknown) => e instanceof TaobaoOrderError && e.kind === 'FORMAT')
+    globalThis.fetch = async () => new Response(JSON.stringify({ tbk_order_details_get_response: { data: { has_next: true, results: { publisher_order_dto: [order] } } } }))
+    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'official' }, req, { sleep }), /翻页位点/)
+    // 成功但无订单：data 存在、无 results 才是零订单
+    globalThis.fetch = async () => new Response(JSON.stringify({ tbk_order_details_get_response: { data: { has_next: false } } }))
+    assert.equal((await queryTaobaoOrders({ ...c, orderSource: 'official' }, req, { sleep })).rows.length, 0)
+    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'official' }, { ...req, page: 2 }, { sleep }), /翻页位点丢失/)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('数据源选择：明确选择优先；旧配置按一次性推断；切换数据源订单唯一键不变', async () => {
+  assert.equal(orderSourceOf({ orderSource: 'official-sc' }, true), 'official-sc')
+  assert.equal(orderSourceOf({}, true), 'ecapi')
+  assert.equal(orderSourceOf({}, false), 'official')
+  assert.equal(orderSourceOf({ orderSource: 'bogus' }, false), 'official')
+  const original = globalThis.fetch
+  try {
+    globalThis.fetch = async (u) => {
+      if (String(u).includes('ecapi.cn')) return new Response(JSON.stringify({ code: 200, data: { has_next: false, list: [order] } }))
+      return new Response(okBody('taobao.tbk.order.details.get'))
+    }
+    const viaEcapi = await queryTaobaoOrders({ ...c, orderSource: 'ecapi' }, req, { ecapi: async () => ({ apiKey: 'ak', tbname: 'tb' }) })
+    const viaOfficial = await queryTaobaoOrders({ ...c, orderSource: 'official' }, req)
+    // 入库唯一键（平台、账号、订单号、子订单号）与数据源无关
+    assert.deepEqual([viaEcapi.rows[0].orderId, viaEcapi.rows[0].lineId], [viaOfficial.rows[0].orderId, viaOfficial.rows[0].lineId])
+    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'ecapi' }, req, { ecapi: async () => null }), /喵有券/)
   } finally {
     globalThis.fetch = original
   }

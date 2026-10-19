@@ -16,6 +16,8 @@ type Cursor = {
   windows: number
   total: number
   type: 1 | 3
+  /** 当前时间段下一页的翻页位点（淘宝 position_index）；与订单在同一事务提交 */
+  position?: string | null
   /** 自动同步生成的任务（定期清理） */
   auto?: boolean
 }
@@ -167,13 +169,14 @@ async function processOrderStep(): Promise<boolean> {
         from = new Date(c.next),
         until = new Date(Math.min(from.getTime() + plugin.maxWindowMs, new Date(c.until).getTime()))
       if (c.page > 10000) throw new BadRequestException('单时段分页超限，已停止；已导入数据保留')
-      const page = await plugin.queryOrders(await readConfig(c.platform), { from, until, page: c.page, type: c.type })
+      const page = await plugin.queryOrders(await readConfig(c.platform), { from, until, page: c.page, type: c.type, position: c.position ?? null })
       if (page.hasMore && !page.rows.length)
         throw new BadRequestException('平台返回空页但仍有下一页，已停止以免遗漏订单')
       const next: Cursor = {
         ...c,
         count: c.count + page.rows.length,
         page: page.hasMore ? c.page + 1 : 1,
+        position: page.hasMore ? (page.position ?? null) : null,
         next: page.hasMore ? c.next : until.toISOString(),
         windows: c.windows + (page.hasMore ? 0 : 1),
       }
@@ -225,7 +228,9 @@ async function processOrderStep(): Promise<boolean> {
               ? tracking!.userId
               : existing?.userId
                 ? null
-                : await ownerBySku(tx, plugin.accountId, row.sku, row.placedAt, plugin.id === 'taobao' ? row.title : undefined)
+                : plugin.id === 'taobao'
+                  ? null // 淘宝订单没有经过验证的用户标识，不按商品 / 标题猜测，进入待关联人工核验
+                  : await ownerBySku(tx, plugin.accountId, row.sku, row.placedAt)
             if (owner && existing?.userId && owner !== existing.userId)
               throw new BadRequestException('订单用户标识冲突，已停止同步，请人工核对')
             const key = {

@@ -5,6 +5,8 @@ import { db, audit, dateText } from './database'
 import { decrypt, encrypt } from './security'
 import { ECAPI_KIND, ecapiConfigured, ecapiFields, ecapiTest } from './platforms/jd/ecapi'
 import { TB_ECAPI_KIND, tbEcapiConfigured, tbEcapiFields, tbEcapiTest } from './platforms/taobao/ecapi'
+import { normalizePublicUrl } from './platforms/taobao/oauth'
+import { orderSourceOf } from './platforms/taobao/orders'
 
 /** 第三方接入（喵有券）：不属于联盟平台账号，独立配置并用开关启用 */
 const thirdParty: Record<string, { fields: readonly (readonly [string, string, boolean])[]; configured: (c: Config) => boolean; test: (c: Config) => Promise<string> }> = {
@@ -67,6 +69,8 @@ export async function integrationStatus(kind: Provider) {
         : !!(cfg.corpId && cfg.agentId && cfg.secret && cfg.token && cfg.aesKey),
     test: test?.value || null,
     callbackPath: '/api/v1/callbacks/wecom',
+    // 淘宝：旧配置未保存订单数据源时，展示推断出的实际数据源
+    ...(kind === 'taobao' ? { orderSource: orderSourceOf(cfg, tbEcapiConfigured(await readConfig(TB_ECAPI_KIND))) } : {}),
     trackingVerified: false,
   }
 }
@@ -94,6 +98,8 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
   if ((kind === 'jd' || kind === ECAPI_KIND) && next.positionId && !/^\d+$/.test(next.positionId))
     throw new BadRequestException('推广位 ID 必须为数字')
   if (kind === 'taobao') {
+    if (next.orderSource && !['official-sc', 'official', 'ecapi'].includes(next.orderSource)) throw new BadRequestException('订单数据源无效')
+    next.publicUrl = normalizePublicUrl(next.publicUrl) || ''
     if (next.pid && !/^mm_\d+_\d+_\d+$/.test(next.pid)) throw new BadRequestException('PID 格式应为 mm_账号_媒体_推广位')
     next.adzoneId = next.pid ? next.pid.split('_')[3] : ''
   }

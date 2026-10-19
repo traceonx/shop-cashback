@@ -106,7 +106,12 @@ function cell(kind: RecordKind, key: string, r: Row) {
   if (v == null || v === '')
     return (
       <span className="text-faint">
-        {key === 'settledAt' && r.settlement === 'PENDING' ? '未结算' : key === 'completedAt' && r.status !== 'CANCELLED' ? '未完成' : '—'}
+        {key === 'settledAt' && r.settlement === 'PENDING'
+          ? '未结算'
+          : key === 'completedAt' && r.status !== 'CANCELLED'
+            ? // 淘宝订单接口不返回确认收货时间
+              r.platform === '淘宝' ? '未获取' : '未完成'
+            : '—'}
       </span>
     )
   return <span className={monoKeys.includes(key) ? 'text-mono' : key.endsWith('At') ? 'nowrap text-muted' : undefined}>{String(v)}</span>

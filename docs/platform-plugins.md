@@ -55,11 +55,41 @@
 
 ## 淘宝订单同步
 
-- 代码：`apps/server/src/platforms/taobao/orders.ts`。官方 `taobao.tbk.order.details.get`：最近一小时用 `query_type=4`（更新时间），历史回补用 `query_type=1`（创建时间）；单窗口 3 小时；第 2 页起回传上一页的 `position_index`（按窗口暂存在内存，进程重启后不带位点继续）；`order_scene=1` 常规订单。
-- 官方返回错误码 11（未开通订单权限）时，1 小时内直接改用喵有券 [tbkOrderDetailsGet](https://www.ecapi.cn/index/index/openapi/id/83.shtml?ptype=1)（付费会员接口，字段与官方一致，需「淘宝联盟 · 喵有券」的 apkey 与 tbname，开关可不开；淘宝授权 30 天有效）。
-- 映射：订单号 `trade_parent_id`，订单行 `trade_id`（TOP 响应按原文解析，超过 2^53 的整数保留为字符串）；状态 12 已付款、13 已失效、14 确认收货、3 已结算；佣金 13 记 0、3 取 `pub_share_fee`、其余取 `pub_share_pre_fee`；付款金额 `alipay_total_price`；下单时间 `tk_create_time`（北京时间），结算时间 `tk_earning_time`。
-- 用户归属：尚未接入渠道 ID（relation_id）/ 会员运营 ID（special_id），订单没有可靠的用户标识。按商品兜底：转链记录保存新版商品 ID（混合转链）与联盟完整标题，订单按 `item_id` 或完整 `item_title` 匹配，下单前 7 天内只有一个用户转过才关联；匹配不上的进入「未关联用户」手动关联。按商品匹配有分享链接误归属等风险，接入渠道备案后改按 relation_id 归属。
-- 后台：订单管理拆为「京东订单」「淘宝订单」子菜单（`/orders/jd`、`/orders/taobao`），`GET /orders?platform=`、`GET /orders/sync-status?platform=`、`POST /orders/sync {platform, hours}` 按平台；不传 platform 时同步所有已配置的联盟。
+### 数据源（明确选择，不隐式切换）
+
+后台「渠道配置 → 淘宝联盟」的「订单数据源」三选一；与转链数据源（「淘宝联盟 · 喵有券」开关）分开配置：
+
+| 数据源 | 接口 | 前提 |
+|---|---|---|
+| 官方账号授权 | [taobao.tbk.sc.order.details.get](https://developer.alibaba.com/docs/api.htm?apiId=43755) | 应用具备该接口权限 + 淘宝账号授权（session） |
+| 官方推广者 | taobao.tbk.order.details.get | 应用具备该接口权限 |
+| 喵有券 | [tbkOrderDetailsGet](https://www.ecapi.cn/index/index/openapi/id/83.shtml?ptype=1) | 「淘宝联盟 · 喵有券」的 apkey 与授权淘宝用户名（付费会员接口） |
+
+- 查询的是联盟推广订单，不是个人购物订单。三者返回同一套字段，由 `orders.ts` 统一转换；订单唯一键为 平台 + 推广账号（`taobao-primary`）+ `trade_parent_id` + `trade_id`，与数据源无关，切换数据源不会重复入库或重复返利。
+- 旧配置没有保存数据源时按一次性规则推断（配置了喵有券授权账号为喵有券，否则为官方推广者），运行中不再「官方失败后改用喵有券」。
+
+### 官方账号授权（OAuth）
+
+依据淘宝开放平台[用户授权介绍](https://developer.alibaba.com/docs/doc.htm?treeId=49&articleId=102635&docType=1)、[taobao.top.auth.token.create](https://developer.alibaba.com/docs/api.htm?apiId=25388)、[taobao.top.auth.token.refresh](https://jaq-doc.alibaba.com/docs/api.htm?scopeId=381&apiId=25387)。代码：`apps/server/src/platforms/taobao/oauth.ts`。
+
+1. 超管点「授权淘宝账号」→ `POST /integrations/taobao/oauth/start` 生成 24 字节随机 state（库里只存 SHA-256，10 分钟有效、一次性，绑定发起的管理员与当前 AppKey），返回 `https://oauth.taobao.com/authorize?response_type=code&client_id=AppKey&redirect_uri=回调&state=&view=web`。
+2. 用户在淘宝官方页面登录并同意，淘宝跳回 `外部访问地址/api/v1/callbacks/taobao/oauth?code=&state=`。
+3. 回调原子取出并删除 state，校验未过期、AppKey 未变更、管理员仍为启用的超管，再用 `taobao.top.auth.token.create`（code 30 分钟内一次性）换取 session；解析 `token_result` 的 access_token、refresh_token、expire_time、refresh_token_valid_time、user_id、user_nick。只有成功才写入，失败不覆盖已有凭证。
+4. 凭证用 CONFIG_ENCRYPTION_KEY（AES-256-GCM）加密保存在系统配置 `oauth:taobao`；接口只返回昵称、状态和到期时间，不返回 session / refresh_token；日志与跳转地址不含 code 或凭证。回调只跳回固定的 `/affiliates?taobao_oauth=ok|fail&reason=代码`。
+5. 续期：只有服务市场订购类应用支持 `taobao.top.auth.token.refresh`；session 到期前 30 分钟尝试刷新并保存新的 refresh_token；不支持或失败时保留原凭证，到期后提示重新授权。接口返回 26 / 27 等 session 错误时标记「授权已失效」（不删除凭证），重新授权后覆盖。
+6. 「解除本系统绑定」只删除本系统保存的凭证，不调用也不声称撤销淘宝侧授权。
+
+回调地址配置：在淘宝开放平台「控制台 → 应用管理 → 应用设置 → 基础信息 → 回调地址」填写与「外部访问地址」同域的地址（官方要求 redirect_uri 与回调地址同域或同一顶级域）。NAS 部署时外部访问地址填浏览器能打开后台的公网域名（经反向代理 / 内网穿透均可，淘宝只做浏览器跳转，不直接访问服务器）；也可用环境变量 `PUBLIC_BASE_URL` 提供默认值。
+
+### 同步
+
+- 历史回补按创建时间（`query_type=1`），最近一小时增量按更新时间（`query_type=4`）；每段 20 分钟（官方日常 3 小时、大促 20 分钟），起点向前重叠 1 分钟，重复数据幂等更新。
+- 第 2 页起必须回传上一页的 `position_index`：位点写在同步任务游标里，与该页订单在同一事务提交，进程重启后从游标继续；位点丢失直接报错，不跳页。
+- 响应缺少 `data`、列表结构异常、提示有下一页却无位点时报错，不当作零订单推进进度。
+- 错误分类：授权失效（26/27/session）标记失效且不重试；无接口权限（11/12/-4002）提示申请权限；限流（7/9100）、超时、服务不可用（3001、isp.*）退避重试 2 次（1s、3s），仍失败则任务失败并保留已导入数据。
+- 映射：状态 12 已付款、13 已失效、14 确认收货、3 已结算；佣金 13 记 0、3 取 `pub_share_fee`、其余取 `pub_share_pre_fee`；「付款金额」按计佣金额口径：未结算取 `alipay_total_price`、结算后取 `pay_price`（与 `total_commission_fee` 的计算口径一致）；下单时间 `tk_create_time`，佣金结算时间 `tk_earning_time`。接口没有确认收货时间字段，「完成时间」显示「未获取」，不与结算时间混用。
+- 用户归属：授权账号是推广者账号，不是下单用户；淘宝订单没有经过验证的追踪标识（尚未接入 relation_id / special_id），不按商品 ID、标题或时间猜测，全部进入「未关联用户」人工关联。同步订单不会增加可提现余额。
+- 后台：订单管理「京东订单」「淘宝订单」子菜单（`/orders/jd`、`/orders/taobao`）；淘宝联盟配置弹窗可「测试订单查询」（`POST /integrations/taobao/orders/test`，查最近 20 分钟第一页，不入库）与「同步历史订单」。
 
 ## 验证
 
