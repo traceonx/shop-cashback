@@ -1,5 +1,6 @@
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common'
 import type { PlatformConfig, PlatformPlugin } from '../types'
+import { activeProxy, outboundFetch, proxyLabel } from '../../proxy'
 import { decimalCents, jdOrderImage, resolveJdSku } from './index'
 
 /**
@@ -50,9 +51,10 @@ export async function ecapiCall(path: string, params: Record<string, string | un
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') query.set(k, v)
   let response: Response
   try {
-    response = await fetch(`https://api.web.ecapi.cn/${path}?${query}`, { signal: AbortSignal.timeout(12000), redirect: 'error' })
+    // 设置了 PROXY_HOST 时经代理访问，出口 IP 为代理节点的 IP（需加入喵有券白名单）
+    response = await outboundFetch('ecapi', `https://api.web.ecapi.cn/${path}?${query}`, { signal: AbortSignal.timeout(12000), redirect: 'error' })
   } catch {
-    throw new ServiceUnavailableException('喵有券接口网络连接失败或超时')
+    throw new ServiceUnavailableException(`喵有券接口网络连接失败或超时${via()}`)
   }
   let raw: any
   try {
@@ -62,8 +64,12 @@ export async function ecapiCall(path: string, params: Record<string, string | un
   }
   const code = String(raw?.code ?? response.status).replace(/[^\w.-]/g, '').slice(0, 20)
   if (code !== '200')
-    throw new BadRequestException(`喵有券接口未成功（错误码 ${code}）：${hints[code] || clean(raw?.msg) || '请核查配置'}`)
+    throw new BadRequestException(`喵有券接口未成功（错误码 ${code}）：${hints[code] || clean(raw?.msg) || '请核查配置'}${code === '401' ? via() : ''}`)
   return raw.data
+}
+const via = () => {
+  const c = activeProxy('ecapi')
+  return c ? `（当前经代理 ${proxyLabel(c)} 访问，白名单应填代理节点的出口 IP）` : '（当前直连，白名单应填服务器的公网出口 IP；出口 IP 不固定时可设置 PROXY_HOST 经固定 IP 的代理访问）'
 }
 
 export async function ecapiRequest(c: PlatformConfig, method: string, params: Record<string, string | undefined>) {

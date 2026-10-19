@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ecapiConvert, ecapiEnabled, ecapiGoods, ecapiRequest } from './platforms/jd/ecapi'
+import { activeProxy } from './proxy'
 
 const config = { enabled: 'true', apiKey: 'ak', keyId: 'kid' }
 const now = Date.now()
@@ -78,5 +79,21 @@ test('白名单错误给出处理提示，非京东推广链接被拒绝', async
     await assert.rejects(ecapiConvert(config, 'https://item.jd.com/1.html'), /有效的京东推广链接/)
   } finally {
     globalThis.fetch = original
+  }
+})
+
+test('设置 PROXY_HOST 时喵有券走代理，401 提示当前代理', async () => {
+  const original = globalThis.fetch
+  const env = process.env.PROXY_HOST
+  try {
+    process.env.PROXY_HOST = 'http://192.168.5.199:7890'
+    assert.equal(activeProxy('ecapi')?.host, '192.168.5.199')
+    delete process.env.PROXY_HOST
+    globalThis.fetch = async () => new Response(JSON.stringify({ code: 401, msg: 'IP非法' }))
+    await assert.rejects(ecapiRequest(config, 'getJdUnionItems', {}), /当前直连/)
+  } finally {
+    globalThis.fetch = original
+    if (env === undefined) delete process.env.PROXY_HOST
+    else process.env.PROXY_HOST = env
   }
 })

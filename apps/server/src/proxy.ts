@@ -1,11 +1,12 @@
 // 出站代理（仅用于少数需要翻墙的请求）：环境变量 PROXY_HOST，如 http://192.168.5.199:7890 或 socks5://user:pass@host:7891（mihomo mixed-port 两种都可）。
-// 只有 PROXIED 中列出的服务走代理（Docker Hub 版本查询、Telegram 通知等境外服务）；企业微信、淘宝、京东等国内接口始终直连。无第三方依赖。
+// 只有 PROXIED 中列出的服务走代理（Docker Hub 版本查询、Telegram 通知等境外服务，以及按 IP 白名单校验的喵有券）；企业微信、淘宝、京东官方等国内接口始终直连。无第三方依赖。
 import { connect as netConnect, type Socket } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 
-const PROXIED = ['dockerhub', 'telegram'] as const
+// ecapi：喵有券按 IP 白名单校验，家用宽带出口 IP 不固定时经代理（固定出口 IP 的节点）访问
+const PROXIED = ['dockerhub', 'telegram', 'ecapi'] as const
 export type ProxyScope = (typeof PROXIED)[number]
 export type ProxyConfig = { protocol: 'socks5' | 'http'; host: string; port: number; username?: string; password?: string }
 
