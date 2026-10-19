@@ -113,3 +113,35 @@ test('官方长链转短链未开通时，用喵有券推广短链（含缓存�
     globalThis.fetch = original
   }
 })
+
+test('不同分享短链即使落地页里搜到同一个数字 ID，也不会命中彼此的缓存', async () => {
+  const original = globalThis.fetch
+  clearTbIdCache()
+  const ecapiMaterials: string[] = []
+  try {
+    globalThis.fetch = async (input, init) => {
+      const u = new URL(String(input))
+      // 两个短链都返回包含同一个无关 ID 的落地页
+      if (u.hostname === 'c.tb.cn') return new Response('<script src="//g.alicdn.com/x.js?id=99999999"></script>', { status: 200 })
+      if (u.hostname === 'api.web.ecapi.cn') {
+        if (u.pathname.endsWith('doTbHighCommissionPromotionUrl')) {
+          const m = u.searchParams.get('material_list')!
+          ecapiMaterials.push(m)
+          const id = m.includes('AAA') ? 'aaaaaaaa-NEWA' : 'bbbbbbbb-NEWB'
+          return new Response(JSON.stringify({ code: 200, data: { material_url_list: [{ link_info_dto: { material_type: 1, material_id: id, cps_short_url: `https://s.click.taobao.com/${id.slice(0, 4)}` } }] } }))
+        }
+      }
+      const p = init!.body as URLSearchParams
+      if (p.get('method') === 'taobao.tbk.tpwd.create') return new Response(JSON.stringify({ tbk_tpwd_create_response: { data: { password_simple: '￥T￥' } } }))
+      const id = p.get('q')!.split('id=')[1]
+      return new Response(JSON.stringify({ tbk_dg_material_optional_upgrade_response: { result_list: { map_data: [{ ...row(id, id.endsWith('NEWA') ? 'A店' : 'B店'), publish_info: { click_url: `//s.click.taobao.com/${id.slice(0, 4)}`, income_info: { commission_amount: '1' } } }] } } }))
+    }
+    const a = await tbHybridConvert(official, third, 'https://c.tb.cn/h.AAA?tk=1', '【淘宝】https://c.tb.cn/h.AAA?tk=1 「A商品」')
+    const b = await tbHybridConvert(official, third, 'https://c.tb.cn/h.BBB?tk=2', '【淘宝】https://c.tb.cn/h.BBB?tk=2 「B商品」')
+    assert.equal(a.snapshot.shop, 'A店')
+    assert.equal(b.snapshot.shop, 'B店')
+    assert.equal(ecapiMaterials.length, 2)
+  } finally {
+    globalThis.fetch = original
+  }
+})

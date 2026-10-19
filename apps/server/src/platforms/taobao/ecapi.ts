@@ -96,7 +96,9 @@ export async function tbHybridConvert(
   if (!official.pid || !official.adzoneId) throw new BadRequestException('请先在淘宝联盟（官方）配置中保存推广位 PID')
   const notices: string[] = []
   const title = shareTitle(content) || ''
-  const numericId = (await resolveShortLink(url).catch(() => ({ itemId: null }))).itemId
+  const resolved = await resolveShortLink(url).catch(() => ({ itemId: null, fromPage: true }))
+  // 缓存键：链接跳转中拿到的数字 ID 才可靠；否则按分享短链本身缓存（不同分享链接互不影响），避免把 A 商品的结果返回给 B 链接
+  const numericId = resolved.itemId && !resolved.fromPage ? `id:${resolved.itemId}` : `link:${url.split(/[?#]/)[0]}`
   const material = (content || url).replace(/\s+/g, ' ').trim().slice(0, 500)
   let promo: Awaited<ReturnType<typeof promote>> | null = null
   const hit = cached(numericId)

@@ -119,7 +119,8 @@ export function titleFromHtml(html: string): string | null {
   return null
 }
 // 解析短链：m.tb.cn / e.tb.cn / c.tb.cn 逐跳请求（最多 3 跳），从跳转地址或页面中取商品 ID 与标题
-export async function resolveShortLink(url: string): Promise<{ itemId: string | null; title: string | null }> {
+// fromPage：ID 是从落地页 HTML 里搜出来的（页面里可能有推荐商品、统计脚本等其他 ID），不可靠，不能作为缓存键
+export async function resolveShortLink(url: string): Promise<{ itemId: string | null; title: string | null; fromPage?: boolean }> {
   const direct = idFromUrl(url)
   if (direct) return { itemId: direct, title: null }
   if (!new URL(url).hostname.endsWith('tb.cn')) return { itemId: null, title: null }
@@ -136,7 +137,7 @@ export async function resolveShortLink(url: string): Promise<{ itemId: string | 
       continue
     }
     const html = await res.text()
-    return { itemId: itemId || idFromText(html), title: titleFromHtml(html) }
+    return itemId ? { itemId, title: titleFromHtml(html) } : { itemId: idFromText(html), title: titleFromHtml(html), fromPage: true }
   }
   return { itemId, title: null }
 }
