@@ -28,6 +28,22 @@
 - 网络：喵有券按调用方公网出口 IP 白名单校验，未加白名单返回错误码 401。属国内接口，直连不走 `PROXY_HOST`。
 - 测试：「测试接口」用关键词查询一次商品，验证 apkey、key_id 与 IP 白名单。
 
+## 淘宝第三方接入（喵有券 + 官方混合）
+
+淘宝联盟商品 ID 升级后，官方接口只接受新版联盟商品 ID（字母数字混合）。分享链接里只有旧的数字 ID，而本应用没有万能转链、万能解析（错误码 11）和消费者比价场景（错误码 1911），无法换成新版 ID；按标题做物料搜索又常有多家店铺卖同名商品，无法确定原商品，只能拒绝转链。因此另接喵有券补齐「数字 ID → 新版 ID」这一步，其余仍用官方接口。
+
+- 代码：`apps/server/src/platforms/taobao/ecapi.ts`；配置加密保存在系统配置 `integration:taobao-ecapi`。后台「联盟配置」中显示为「淘宝联盟 · 喵有券」，带「第三方」标签。
+- 字段：启用开关、喵有券 apkey（可与京东共用）、喵有券「账号授权」中已授权的淘宝用户名 tbname。推广位使用淘宝联盟（官方）配置的 PID；不传 relation_id，喵有券后台不要设置默认渠道 ID。
+- 流程（已用暴龙眼镜框、FILA 跑鞋实测跑通）：
+  1. 喵有券[万能转链 doTbHighCommissionPromotionUrl](https://www.ecapi.cn/index/index/openapi/id/330.shtml?ptype=1)：`material_list` 传原分享文案，取得推广链接和推广淘口令；如返回的 `material_id` 已是新版 ID 则跳过第 2 步。
+  2. 喵有券[万能解析 doCommonPromotionUrlParse](https://www.ecapi.cn/index/index/openapi/id/346.shtml?ptype=1)（付费会员接口）：解析上一步的推广淘口令，`link_info_dto.material_id` 为新版联盟商品 ID。
+  3. 官方 `taobao.tbk.dg.material.optional.upgrade`：`q=https://uland.taobao.com/item/edetail?id=新版ID`、`biz_scene_id=1`，只接受 `item_id` 与新版 ID 完全一致的结果，取价格、优惠、预计佣金与官方推广链接，再用官方 `tbk.tpwd.create` 生成淘口令。
+- 次数：每个新商品 2 次喵有券 + 1 次官方；数字 ID → 新版 ID 在进程内缓存 24 小时（最多 2000 条），同一商品重复转链只调官方。缓存的 ID 查不到时自动重新走喵有券。
+- 兜底：官方未命中时使用喵有券返回的推广链接与淘口令，提示「未取到官方价格与佣金」，不计算预计返现，避免混用两套佣金口径（实测同一商品喵有券佣金带多件条件，与官方单品预计佣金不同）。
+- 开关：启用且 apkey、tbname 齐全时淘宝链接走混合流程（仍需官方 AppKey / AppSecret / PID）；关闭时沿用官方标题搜索转链。混合流程失败直接报错，不自动退回官方。
+- 网络：喵有券按公网出口 IP 白名单校验（401）。「测试接口」调用 getTbAuthList，确认 tbname 已授权并显示到期时间。
+- 未验证：淘宝订单同步、用户自动归属与最终返利结算。
+
 ## 历史订单同步
 
 后台可选择最近一小时更新、一天、七天、三十天、九十天订单。除一小时选项按更新时间查询外，历史回补按下单时间查询。每个窗口不超过一小时，按官方分页结果继续获取；不按本系统的推广位筛选，但可见范围仍由京东账号和接口权限决定。

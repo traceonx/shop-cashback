@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import { errorText } from '../lib/format'
 import { Avatar, Card, Chip, PlatformLogo } from '../ui'
 
-export type IntegrationKind = 'wecom' | 'jd' | 'taobao' | 'jd-ecapi'
+export type IntegrationKind = 'wecom' | 'jd' | 'taobao' | 'jd-ecapi' | 'taobao-ecapi'
 export type IntegrationField = { key: string; label: string; secret: boolean; value: string; configured: boolean }
 export type IntegrationTest = { status: string; message: string; checkedAt: string }
 export type IntegrationData = {

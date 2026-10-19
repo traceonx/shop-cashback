@@ -9,7 +9,6 @@ import { decimalCents, jdOrderImage, resolveJdSku } from './index'
  * 文档：https://www.ecapi.cn/index/index/openapi/id/51.shtml（商品查询）、id/56（转链）
  */
 export const ECAPI_KIND = 'jd-ecapi'
-export const ECAPI_BASE = 'https://api.web.ecapi.cn/jingdong/'
 export const ecapiFields = [
   ['enabled', '启用', false],
   ['apiKey', '喵有券 apkey', true],
@@ -45,13 +44,13 @@ function list(value: any, element: string): any[] | null {
   return null
 }
 
-export async function ecapiRequest(c: PlatformConfig, method: string, params: Record<string, string | undefined>) {
-  if (!ecapiConfigured(c)) throw new ServiceUnavailableException('请先在「京东联盟 · 喵有券」配置中保存 apkey 和 key_id')
-  const query = new URLSearchParams({ apkey: c.apiKey.trim(), key_id: c.keyId.trim() })
+/** 喵有券通用 GET 调用（京东 / 淘宝共用）：path 如 jingdong/getJdUnionItems、taoke/doCommonPromotionUrlParse */
+export async function ecapiCall(path: string, params: Record<string, string | undefined>) {
+  const query = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') query.set(k, v)
   let response: Response
   try {
-    response = await fetch(`${ECAPI_BASE}${method}?${query}`, { signal: AbortSignal.timeout(12000), redirect: 'error' })
+    response = await fetch(`https://api.web.ecapi.cn/${path}?${query}`, { signal: AbortSignal.timeout(12000), redirect: 'error' })
   } catch {
     throw new ServiceUnavailableException('喵有券接口网络连接失败或超时')
   }
@@ -65,6 +64,11 @@ export async function ecapiRequest(c: PlatformConfig, method: string, params: Re
   if (code !== '200')
     throw new BadRequestException(`喵有券接口未成功（错误码 ${code}）：${hints[code] || clean(raw?.msg) || '请核查配置'}`)
   return raw.data
+}
+
+export async function ecapiRequest(c: PlatformConfig, method: string, params: Record<string, string | undefined>) {
+  if (!ecapiConfigured(c)) throw new ServiceUnavailableException('请先在「京东联盟 · 喵有券」配置中保存 apkey 和 key_id')
+  return ecapiCall(`jingdong/${method}`, { apkey: c.apiKey.trim(), key_id: c.keyId.trim(), ...params })
 }
 
 const PROMOTION_HOSTS = ['u.jd.com', '3.cn', 'union-click.jd.com']
