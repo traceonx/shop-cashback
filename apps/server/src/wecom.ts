@@ -327,7 +327,7 @@ export async function processInbox() {
               `预计返现：${p.rebate != null ? yuan(p.rebate) : '待确认'}`,
               !known && p.infoMessage ? `商品信息未获取：${p.infoMessage}` : null,
               p.password ? `淘口令：${p.password}` : null,
-              p.password ? '👉 点击卡片购买，或复制下一条消息打开手机淘宝' : `👉 点击链接购买：${p.promotionUrl}`,
+              `👉 点击链接购买：${p.promotionUrl}`,
             ].filter(Boolean).join('\n'),
             url: p.promotionUrl,
             picurl: p.imageUrl || undefined,

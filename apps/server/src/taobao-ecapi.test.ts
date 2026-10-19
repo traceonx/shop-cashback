@@ -64,11 +64,27 @@ test('喵有券解析新版 ID 后按 ID 命中官方物料，同款他店不会
   }
 })
 
-test('官方物料未命中时用喵有券推广链接兜底，不展示佣金', async () => {
+test('按新版ID链接精确查询的单条结果允许官方重新生成动态ID', async () => {
   const original = globalThis.fetch
   clearTbIdCache()
   try {
-    mock([row('8B5mjq-OTHER', '博士眼镜官方旗舰店')])
+    mock([row('differentDynamicPrefix-NEWID', '暴龙品尊专卖店')])
+    const r = await tbHybridConvert(official, third, url, content)
+    assert.equal(r.link, 'https://s.click.taobao.com/official')
+    assert.equal(r.snapshot.price, 113800)
+    assert.equal(r.snapshot.payablePrice, 87300)
+    assert.equal(r.snapshot.commission, 1336)
+    assert.equal(r.snapshot.imageUrl, 'https://img.alicdn.com/a.jpg')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('官方精确查询返回多个未匹配商品时用喵有券推广链接兜底，不展示佣金', async () => {
+  const original = globalThis.fetch
+  clearTbIdCache()
+  try {
+    mock([row('8B5mjq-OTHER', '博士眼镜官方旗舰店'), row('9C6njr-ANOTHER', '另一家店')])
     const r = await tbHybridConvert(official, third, url, content)
     assert.equal(r.link, 'https://s.click.taobao.com/ecapi')
     assert.equal(r.snapshot.password, '￥ECAPI￥')

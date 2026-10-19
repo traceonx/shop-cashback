@@ -75,7 +75,12 @@ async function officialById(official: PlatformConfig, newId: string, title: stri
     page_no: 1,
     page_size: 20,
   })
-  const found = parseMaterialSearch(rowsOf(resp?.result_list, 'map_data'), newId, title)
+  const rows = rowsOf(resp?.result_list, 'map_data')
+  // q 是含新版 ID 的商品链接，单条结果即为该链接对应的商品。
+  // 联盟会重新生成动态 ID，不能要求返回 ID 与输入 ID 字符串相等。
+  // 多条结果仍执行原有匹配，不将关键词搜索候选误当成原商品。
+  const matchId = rows.length === 1 && isNewId(rows[0]?.item_id) ? String(rows[0].item_id) : newId
+  const found = parseMaterialSearch(rows, matchId, title)
   return found.status === 'ok' && found.by === 'id' && found.url ? found : null
 }
 
