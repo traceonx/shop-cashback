@@ -319,6 +319,9 @@ export async function processInbox() {
           // 购买链接：淘宝优先用淘口令里的 m.tb.cn 链接（手淘识别率高），否则用推广短链；卡片点击与第二条消息用同一个链接
           const taobao = p.category === '淘宝商品'
           const buyUrl = (taobao && p.password && /https:\/\/m\.tb\.cn\/[\w.]+/.exec(p.password)?.[0]) || p.promotionUrl
+          // 淘口令里取到链接为止（去掉后面的商品标题等文案）；口令里没有链接时在口令后补上购买链接
+          const tpwdHead = taobao && p.password ? /^[\s\S]*?https:\/\/m\.tb\.cn\/[\w.]+/.exec(p.password.trim())?.[0] : null
+          const buyText = tpwdHead ? tpwdHead.replace(/\s+/g, ' ') : taobao && p.password ? `${p.password.trim()} ${buyUrl}` : buyUrl
           // 图文卡片：商品图 + 价格摘要，点击卡片直接打开购买链接
           reply = {
             title: known ? p.product : `${p.category || '商品'} · 转链成功`,
@@ -332,8 +335,8 @@ export async function processInbox() {
             ].filter(Boolean).join('\n'),
             url: buyUrl,
             picurl: p.imageUrl || undefined,
-            // 第二条只发链接，方便长按复制
-            followup: `${buyUrl}\n复制这条消息，打开手机${taobao ? '淘宝' : '京东'}即可领券购买`,
+            // 第二条：淘宝为「淘口令 + 链接」（如 87￥ HU006 dMKpTuBpLuF￥ https://m.tb.cn/h.xxx），京东只发链接，方便长按复制
+            followup: `${buyText}\n复制这条消息，打开手机${taobao ? '淘宝' : '京东'}即可领券购买`,
           }
         } catch (e) {
           reply = e instanceof Error ? e.message : '转链失败，请稍后重试。'
