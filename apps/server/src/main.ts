@@ -41,6 +41,7 @@ import { getMenu, saveMenu, publishMenu, republishStaleMenu } from './wecom-menu
 import { env, requireEnv } from './config'
 import { hashPassword, verifyPassword } from './security'
 import * as business from './business'
+import { egressInfo } from './proxy'
 import { startOrderSync, startAllOrderSync, orderSyncStatus, processOrderSync } from './order-sync'
 import { startAutoSync } from './auto-sync'
 import { platform, listPlatforms } from './platforms/registry'
@@ -457,6 +458,10 @@ class AdminController {
   @Get('system/logs/download') downloadLogs(@Res() res: Response) {
     res.setHeader('Content-Disposition', `attachment; filename="shop-cashback-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.log"`)
     res.type('text/plain; charset=utf-8').send(logText())
+  }
+  /** 服务器出口 IP（直连 / 经代理），用于核对喵有券等 IP 白名单 */
+  @Get('system/egress-ip') async egressIp() {
+    return { data: await egressInfo() }
   }
   @Get('system/update') async systemUpdate() {
     return { data: await updateStatus() }

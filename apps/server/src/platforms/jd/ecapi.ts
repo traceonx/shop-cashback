@@ -53,8 +53,16 @@ export async function ecapiCall(path: string, params: Record<string, string | un
   try {
     // 设置了 PROXY_HOST 时经代理访问，出口 IP 为代理节点的 IP（需加入喵有券白名单）
     response = await outboundFetch('ecapi', `https://api.web.ecapi.cn/${path}?${query}`, { signal: AbortSignal.timeout(12000), redirect: 'error' })
-  } catch {
-    throw new ServiceUnavailableException(`喵有券接口网络连接失败或超时${via()}`)
+  } catch (e) {
+    // 经代理失败（代理不可用或节点超时）时直连重试一次；直连出口 IP 也在白名单里时仍能成功
+    const proxy = activeProxy('ecapi')
+    if (!proxy) throw new ServiceUnavailableException(`喵有券接口网络连接失败或超时${via()}`)
+    console.warn(`[喵有券] 经代理 ${proxyLabel(proxy)} 请求失败，改为直连重试：${e instanceof Error ? e.message : e}`)
+    try {
+      response = await fetch(`https://api.web.ecapi.cn/${path}?${query}`, { signal: AbortSignal.timeout(12000), redirect: 'error' })
+    } catch {
+      throw new ServiceUnavailableException(`喵有券接口网络连接失败或超时（经代理 ${proxyLabel(proxy)} 与直连均失败）`)
+    }
   }
   let raw: any
   try {

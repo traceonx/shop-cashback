@@ -174,3 +174,34 @@ export async function streamGet(scope: ProxyScope, url: string, headers: Record<
     req.end()
   })
 }
+
+/* ---------------- 出口 IP 查询 ---------------- */
+
+// 国内 IP 回显服务优先，失败时换下一个
+const IP_SOURCES = ['https://4.ipw.cn', 'https://ip.3322.net', 'https://api.ipify.org']
+async function lookupIp(get: (url: string) => Promise<Response>) {
+  let error = ''
+  for (const url of IP_SOURCES) {
+    try {
+      const res = await get(url)
+      const ip = /\b(\d{1,3}(?:\.\d{1,3}){3})\b/.exec(await res.text())?.[1]
+      if (ip) return { ip, source: new URL(url).hostname, error: null }
+      error = `${new URL(url).hostname} 未返回 IP`
+    } catch (e) {
+      error = `${new URL(url).hostname}：${e instanceof Error ? e.message : '请求失败'}`
+    }
+  }
+  return { ip: null, source: null, error }
+}
+/**
+ * 服务器出口 IP：直连出口，以及设置了 PROXY_HOST 时经代理的出口（喵有券请求走这条）。
+ * 经代理的结果取决于代理的分流规则：查询服务与 ecapi.cn 分流到同一节点时，才等于喵有券看到的 IP。
+ */
+export async function egressInfo() {
+  const c = activeProxy('ecapi')
+  const [direct, proxy] = await Promise.all([
+    lookupIp((url) => fetch(url, { signal: AbortSignal.timeout(6000), redirect: 'follow' })),
+    c ? lookupIp((url) => proxiedFetch(c, url, { signal: AbortSignal.timeout(8000) })) : Promise.resolve(null),
+  ])
+  return { direct, proxy: c && proxy ? { label: proxyLabel(c), ...proxy } : null, checkedAt: new Date().toISOString() }
+}

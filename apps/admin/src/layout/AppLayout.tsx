@@ -7,6 +7,7 @@ import {
   Check,
   ChevronRight,
   FileText,
+  Globe,
   LayoutDashboard,
   Link2,
   LogOut,
@@ -29,6 +30,7 @@ import { IconButton } from '../ui'
 import { UserAvatar } from './UserAvatar'
 import { LogViewer } from '../pages/LogViewer'
 import { Conversion } from '../pages/Conversion'
+import { EgressIp } from '../pages/EgressIp'
 
 type NavItem = { path: string; label: string; icon: LucideIcon; children?: { path: string; label: string }[] }
 export const navigation: { title?: string; items: NavItem[] }[] = [
@@ -72,6 +74,7 @@ export function AppLayout({ onLogout, notify, children }: { onLogout: () => void
   const [drawer, setDrawer] = useState(false)
   const [logs, setLogs] = useState(false)
   const [converting, setConverting] = useState(false)
+  const [egress, setEgress] = useState(false)
 
   useEffect(() => setDrawer(false), [location.pathname])
 
@@ -111,7 +114,7 @@ export function AppLayout({ onLogout, notify, children }: { onLogout: () => void
           <span className="spacer" />
           <div className="navbar-actions">
             <IconButton icon={FileText} label="实时日志" onClick={() => setLogs(true)} />
-            <AccountMenu onLogout={onLogout} onConvert={() => setConverting(true)} />
+            <AccountMenu onLogout={onLogout} onConvert={() => setConverting(true)} onEgress={() => setEgress(true)} />
           </div>
         </header>
         <main className="page" key={location.pathname}>
@@ -120,6 +123,7 @@ export function AppLayout({ onLogout, notify, children }: { onLogout: () => void
       </div>
       {logs && <LogViewer onClose={() => setLogs(false)} />}
       {converting && <Conversion notify={notify} onClose={() => setConverting(false)} />}
+      {egress && <EgressIp onClose={() => setEgress(false)} />}
     </div>
   )
 }
@@ -153,8 +157,8 @@ function NavGroup({ item }: { item: NavItem }) {
   )
 }
 
-/** 头像菜单：个人信息、转链测试、主题、退出登录 */
-function AccountMenu({ onLogout, onConvert }: { onLogout: () => void; onConvert: () => void }) {
+/** 头像菜单：个人信息、转链测试、出口 IP、主题、退出登录 */
+function AccountMenu({ onLogout, onConvert, onEgress }: { onLogout: () => void; onConvert: () => void; onEgress: () => void }) {
   const navigate = useNavigate()
   const profile = useProfile()
   const { mode, setMode } = useTheme()
@@ -212,6 +216,18 @@ function AccountMenu({ onLogout, onConvert }: { onLogout: () => void; onConvert:
           >
             <Link2 size={20} />
             转链测试
+          </button>
+          <button
+            type="button"
+            className="menu-item"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              onEgress()
+            }}
+          >
+            <Globe size={20} />
+            出口 IP 查询
           </button>
           <button type="button" className="menu-item" role="menuitem" aria-expanded={themeOpen} onClick={() => setThemeOpen(!themeOpen)}>
             <current.icon size={20} />

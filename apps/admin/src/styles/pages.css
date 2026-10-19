@@ -604,3 +604,24 @@
     grid-column: 1 / -1;
   }
 }
+
+/* 出口 IP 查询 */
+.egress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.egress-row strong {
+  display: block;
+}
+.egress-row small {
+  color: var(--c-text-3);
+  font-size: 12px;
+}
+.egress-ip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+}
