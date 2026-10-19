@@ -265,6 +265,10 @@
   font-size: 16px;
   font-weight: 500;
 }
+.provider-text strong .chip {
+  margin-left: 8px;
+  vertical-align: middle;
+}
 .provider-text small {
   color: var(--c-text-3);
   font-size: 12px;

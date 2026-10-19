@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client'
 import { db, json, dateText, centsNumber, audit } from './database'
 import { readConfig } from './integrations'
 import { platformForContent, platform } from './platforms/registry'
+import { ECAPI_KIND, ecapiConvert, ecapiEnabled } from './platforms/jd/ecapi'
 
 export async function settings() {
   const row = await db.systemConfig.findUnique({ where: { key: 'rules' } })
@@ -103,7 +104,10 @@ export async function listPromotions() {
 export async function convert(content: string, actor: string, trace: string, userId?: string) {
   const { plugin, url } = platformForContent(content)
   const c = await readConfig(plugin.id)
-  if (!plugin.configured(c)) throw new BadRequestException('请先保存该平台的应用凭证')
+  // 京东（第三方）开启后，京东链接改由喵有券查券转链；官方接入配置保持不变
+  const third = plugin.id === 'jd' ? await readConfig(ECAPI_KIND) : null
+  const useThird = !!third && ecapiEnabled(third)
+  if (!useThird && !plugin.configured(c)) throw new BadRequestException('请先保存该平台的应用凭证')
   let trackingCode = ''
   if (userId) {
     const user = await db.user.findUnique({ where: { id: userId } })
@@ -126,7 +130,9 @@ export async function convert(content: string, actor: string, trace: string, use
     },
   })
   try {
-    const { link, snapshot } = await plugin.convert(c, url, trackingCode || undefined, content)
+    const { link, snapshot } = useThird
+      ? await ecapiConvert(third!, url, trackingCode || undefined)
+      : await plugin.convert(c, url, trackingCode || undefined, content)
     const rule = userId ? await db.rebateRule.findFirst({ where: { scopeKey: 'user:' + userId } }) : null
     const basisPoints = rule?.basisPoints ?? Math.round((await settings()).ratio * 100)
     snapshot.rebate =

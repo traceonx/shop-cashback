@@ -44,6 +44,7 @@ import * as business from './business'
 import { startOrderSync, orderSyncStatus, processOrderSync } from './order-sync'
 import { startAutoSync } from './auto-sync'
 import { platform, listPlatforms } from './platforms/registry'
+import { ECAPI_KIND } from './platforms/jd/ecapi'
 import { integrationStatus, saveConfig, testConnection, readConfig, type Provider } from './integrations'
 import { decryptCallback, receiveCallback, processInbox } from './wecom'
 import { version as appVersion, versionText } from './version'
@@ -498,7 +499,7 @@ class AdminController {
   }
 }
 function provider(kind: string): Provider {
-  if (kind !== 'wecom') platform(kind)
+  if (kind !== 'wecom' && kind !== ECAPI_KIND) platform(kind)
   return kind
 }
 @Module({ controllers: [PublicController, AdminController], providers: [AuthGuard] })

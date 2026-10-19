@@ -3,8 +3,10 @@ import { platform, listPlatforms } from './platforms/registry'
 export { decimalCents, jdDate, parseJdJson, jdSign, orderRows } from './platforms/jd'
 import { db, audit, dateText } from './database'
 import { decrypt, encrypt } from './security'
+import { ECAPI_KIND, ecapiConfigured, ecapiFields, ecapiTest } from './platforms/jd/ecapi'
 export const fields = {
   ...Object.fromEntries(listPlatforms().map((p) => [p.id, p.fields])),
+  [ECAPI_KIND]: ecapiFields,
   wecom: [
     ['name', '名称', false],
     ['enabled', '启用', false],
@@ -19,8 +21,16 @@ export const fields = {
 } as const
 export type Provider = string
 export type Config = Record<string, string>
-const configFields = (kind: string) => (kind === 'wecom' ? fields.wecom : platform(kind).fields)
+const configFields = (kind: string) =>
+  kind === 'wecom' ? fields.wecom : kind === ECAPI_KIND ? ecapiFields : platform(kind).fields
+/** 第三方接入不属于联盟平台账号，配置加密保存在系统配置中 */
+const thirdPartyKey = (kind: string) => `integration:${kind}`
 export async function readConfig(kind: Provider): Promise<Config> {
+  if (kind === ECAPI_KIND) {
+    const c = await db.systemConfig.findUnique({ where: { key: thirdPartyKey(kind) } })
+    const value = c?.value as { encrypted?: string } | null
+    return value?.encrypted ? decrypt(value.encrypted, thirdPartyKey(kind)) : {}
+  }
   if (kind !== 'wecom') {
     const c = await db.affiliateConfig.findUnique({ where: { accountId: `${kind}-primary` } })
     return c ? decrypt(c.encryptedConfig, `${kind}-primary`) : {}
@@ -41,7 +51,9 @@ export async function integrationStatus(kind: Provider) {
       configured: !!cfg[key],
     })),
     configured:
-      kind !== 'wecom'
+      kind === ECAPI_KIND
+        ? ecapiConfigured(cfg)
+        : kind !== 'wecom'
         ? platform(kind).configured(cfg)
         : !!(cfg.corpId && cfg.agentId && cfg.secret && cfg.token && cfg.aesKey),
     test: test?.value || null,
@@ -68,14 +80,19 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
     throw new BadRequestException('代理地址需以 http:// 或 https:// 开头')
   if (kind === 'wecom' && next.agentId && !/^\d+$/.test(next.agentId))
     throw new BadRequestException('AgentID 必须为数字')
-  if (kind === 'jd' && next.positionId && !/^\d+$/.test(next.positionId))
+  if (kind === ECAPI_KIND && next.enabled && !['true', 'false'].includes(next.enabled))
+    throw new BadRequestException('启用状态无效')
+  if ((kind === 'jd' || kind === ECAPI_KIND) && next.positionId && !/^\d+$/.test(next.positionId))
     throw new BadRequestException('推广位 ID 必须为数字')
   if (kind === 'taobao') {
     if (next.pid && !/^mm_\d+_\d+_\d+$/.test(next.pid)) throw new BadRequestException('PID 格式应为 mm_账号_媒体_推广位')
     next.adzoneId = next.pid ? next.pid.split('_')[3] : ''
   }
   await db.$transaction(async (tx) => {
-    if (kind !== 'wecom') {
+    if (kind === ECAPI_KIND) {
+      const value = { encrypted: encrypt(next, thirdPartyKey(kind)) }
+      await tx.systemConfig.upsert({ where: { key: thirdPartyKey(kind) }, create: { key: thirdPartyKey(kind), value }, update: { value } })
+    } else if (kind !== 'wecom') {
       await tx.affiliatePlatform.upsert({ where: { code: kind }, create: { id: kind, code: kind }, update: {} })
       await tx.affiliateAccount.upsert({
         where: { id: `${kind}-primary` },
@@ -155,7 +172,9 @@ export async function testConnection(kind: Provider, actor: string, trace: strin
   let status = 'CONNECTED',
     message = ''
   try {
-    if (kind !== 'wecom') {
+    if (kind === ECAPI_KIND) {
+      message = await ecapiTest(await readConfig(kind))
+    } else if (kind !== 'wecom') {
       message = await platform(kind).test(await readConfig(kind))
     } else {
       await wecomToken(await readConfig('wecom'))

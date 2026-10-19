@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import { errorText } from '../lib/format'
 import { Avatar, Card, Chip, PlatformLogo } from '../ui'
 
-export type IntegrationKind = 'wecom' | 'jd' | 'taobao'
+export type IntegrationKind = 'wecom' | 'jd' | 'taobao' | 'jd-ecapi'
 export type IntegrationField = { key: string; label: string; secret: boolean; value: string; configured: boolean }
 export type IntegrationTest = { status: string; message: string; checkedAt: string }
 export type IntegrationData = {
@@ -97,6 +97,7 @@ export function ProviderTile({
   loading,
   onClick,
   extra,
+  tag,
 }: {
   platform?: string
   icon: LucideIcon
@@ -106,13 +107,18 @@ export function ProviderTile({
   loading?: boolean
   onClick: () => void
   extra?: ReactNode
+  /** 名称旁的小标签，如「官方」「第三方」 */
+  tag?: string
 }) {
   return (
     <Card className="provider-tile">
       <button type="button" onClick={onClick} disabled={loading}>
         {platform ? <PlatformLogo platform={platform} size="lg" /> : <Avatar icon={icon} tone={status === 'ok' ? 'success' : status === 'pending' ? 'warning' : 'secondary'} size="lg" />}
         <span className="provider-text">
-          <strong>{name}</strong>
+          <strong>
+            {name}
+            {tag && <Chip tone="secondary">{tag}</Chip>}
+          </strong>
           <small>{description}</small>
         </span>
         <Chip tone={status === 'ok' ? 'success' : status === 'pending' ? 'warning' : 'secondary'} dot>
