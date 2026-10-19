@@ -393,7 +393,7 @@ export const taobaoPlugin: PlatformPlugin = {
     const now = new Date()
     const orders = await probe('taobao.tbk.order.details.get', { query_type: '4', start_time: dateText(new Date(now.getTime() - 3600000)), end_time: dateText(now), page_size: '1' })
     const route = convert === '可用' ? '转链方式：万能转链' : search === '可用' ? '转链方式：物料搜索（万能转链为邀约权限，未开通不影响使用）' : '无可用转链权限，需申请「物料搜索」或「万能转链」'
-    return `签名与 AppKey 验证通过。商品详情：${detail}；物料搜索：${search}；万能转链：${convert}；淘口令：${tpwd}；长链转短链：${spread}；订单查询：${orders === '可用' ? '可用' : '未开通（将改用喵有券查询，需配置「淘宝联盟 · 喵有券」）'}。${route}`
+    return `签名与 AppKey 验证通过。商品详情：${detail}；物料搜索：${search}；万能转链：${convert}；淘口令：${tpwd}；长链转短链：${spread}；推广者订单查询（taobao.tbk.order.details.get）：${orders === '可用' ? '可用' : '未开通（订单数据源可改选「官方账号授权」或「喵有券」）'}。${route}`
   },
   async queryOrders(c, request) {
     const deps = orderDeps(c)
