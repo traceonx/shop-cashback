@@ -209,8 +209,22 @@ export async function resolveJdSku(input: string): Promise<string | undefined> {
   }
   return undefined
 }
+/** 京东佣金结算：payMonth 为结算日期 yyyyMMdd（0 表示未结算），日期已到即视为已结算；无效订单为已失效 */
+export function jdOrderSettlement(value: unknown) {
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const code = String(raw.validCode ?? '')
+  // validCode 15 以下（拆单、取消、违规等）均为无效订单，不会结算
+  if (code !== '' && Number(code) < 15) return { state: 'INVALID' as const, settledAt: null }
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(String(raw.payMonth ?? ''))
+  if (code === '17' && m && m[0] !== '00000000') {
+    const day = `${m[1]}-${m[2]}-${m[3]}`
+    if (new Date(`${day}T00:00:00+08:00`).getTime() <= Date.now()) return { state: 'SETTLED' as const, settledAt: day }
+  }
+  return { state: 'PENDING' as const, settledAt: null }
+}
 export const jdPlugin: PlatformPlugin = {
   orderStatus: jdOrderStatus,
+  orderSettlement: jdOrderSettlement,
   orderAmounts: jdOrderAmounts,
   orderImage: jdOrderImage,
   id: 'jd',

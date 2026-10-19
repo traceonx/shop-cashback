@@ -3,7 +3,7 @@ import { Banknote, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, Refresh
 import { api, type Row } from '../lib/api'
 import { amount, errorText, money, type Notify } from '../lib/format'
 import { statusLabel } from '../lib/labels'
-import { Alert, Avatar, Button, Card, CardBody, EmptyState, IconButton, Loading, Modal, Pagination, PlatformTag, confirm, Select, SplitButton, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
+import { Alert, Avatar, Button, Card, CardBody, Chip, EmptyState, IconButton, Loading, Modal, Pagination, PlatformTag, confirm, Select, SplitButton, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
 import { ConversionCard } from './Conversion'
 import { ProductCell } from './shared'
 
@@ -33,7 +33,9 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
       ['ratio', '返现比例', true],
       ['status', '状态'],
       ['createdAt', '下单时间'],
-      ['completedAt', '完成时间'],
+      ['settlement', '结算'],
+      ['settledAt', '佣金结算时间'],
+      ['completedAt', '完成时间', true],
       ['externalOrderId', '订单号', true],
     ],
   },
@@ -82,9 +84,14 @@ function cell(kind: RecordKind, key: string, r: Row) {
   const v = r[key]
   if (key === 'status') return <StatusChip value={String(v)} />
   if (key === 'platform') return <PlatformTag platform={String(v ?? '')} />
+  if (key === 'settlement') {
+    const [tone, text] = (({ SETTLED: ['success', '已结算'], INVALID: ['secondary', '已失效'] }) as Record<string, ['success' | 'secondary', string]>)[String(v)] || ['warning', '未结算']
+    return <Chip tone={tone} dot>{text}</Chip>
+  }
   if (moneyKeys.includes(key)) return key === 'paidAmount' && v == null ? <span className="text-faint">接口未提供</span> : <span className="text-amount">{amount(v)}</span>
   if (key === 'product')
-    return kind === 'orders' ? <ProductCell row={r} platform={String(r.platform ?? '')} /> : <ProductCell row={r} sub={String(r.category || '')} />
+    // 订单已按平台分子菜单，列表不再显示平台角标
+    return kind === 'orders' ? <ProductCell row={r} /> : <ProductCell row={r} sub={String(r.category || '')} />
   if (key === 'name')
     return (
       <div className="cell-media">
@@ -97,7 +104,11 @@ function cell(kind: RecordKind, key: string, r: Row) {
     )
   if (key === 'ratio') return v == null ? '待确认' : <span title={String(r.ratioNote || '')}>{String(v)}%</span>
   if (v == null || v === '')
-    return <span className="text-faint">{key === 'completedAt' && r.status !== 'CANCELLED' ? (r.platform === '淘宝' ? '未结算' : '未完成') : '—'}</span>
+    return (
+      <span className="text-faint">
+        {key === 'settledAt' && r.settlement === 'PENDING' ? '未结算' : key === 'completedAt' && r.status !== 'CANCELLED' ? '未完成' : '—'}
+      </span>
+    )
   return <span className={monoKeys.includes(key) ? 'text-mono' : key.endsWith('At') ? 'nowrap text-muted' : undefined}>{String(v)}</span>
 }
 
@@ -129,8 +140,7 @@ function ago(at?: string | null) {
 
 /** platform：订单管理按平台拆成子菜单（京东订单 / 淘宝订单），列表、同步与同步状态都只针对该平台 */
 export function Records({ kind, notify, platform }: { kind: RecordKind; notify: Notify; platform?: 'jd' | 'taobao' }) {
-  // 淘宝订单的完成时间是联盟佣金结算时间（tk_earning_time），列名随平台调整
-  const allColumns = config[kind].columns.map((c): Column => (platform === 'taobao' && c[0] === 'completedAt' ? ['completedAt', '佣金结算时间', c[2]] : c))
+  const allColumns = config[kind].columns
   const qs = kind === 'orders' && platform ? `?platform=${platform}` : ''
   const listUrl = `/${kind}${qs}`
   const columns = allColumns.filter((c) => !c[2])

@@ -209,8 +209,14 @@ export async function listOrders(platformId?: string) {
       rawStatus: o.rawStatus,
       createdAt: dateText(o.placedAt),
       completedAt: o.completedAt ? dateText(o.completedAt) : null,
+      ...settlementOf(o.platform, o.rawData, currentStatus),
     }
   })
+}
+/** 佣金结算状态与结算时间；平台未提供时按订单状态推断（已取消为已失效） */
+function settlementOf(platformId: string, raw: unknown, status: string) {
+  const s = platform(platformId).orderSettlement?.(raw) ?? { state: status === 'CANCELLED' ? 'INVALID' : 'PENDING', settledAt: null }
+  return { settlement: s.state, settledAt: s.settledAt }
 }
 export async function listWithdrawals() {
   return (

@@ -28,6 +28,8 @@ export interface PlatformPlugin {
   orderImage(raw: unknown): string | null
   orderAmounts(raw: unknown): { amount: number | null; commission: number | null; commissionBase: number | null }
   orderStatus(rawStatus: string): PlatformOrderStatus
+  /** 佣金结算状态：SETTLED 已结算（settledAt 为结算日期文本）、PENDING 未结算、INVALID 已失效 */
+  orderSettlement?(raw: unknown): { state: 'SETTLED' | 'PENDING' | 'INVALID'; settledAt: string | null }
   configured(config: PlatformConfig): boolean
   normalizeUrl(content: string): string
   /** 是否已接入订单同步（未接入的平台不参与自动同步） */

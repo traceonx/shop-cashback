@@ -34,6 +34,17 @@ export function taobaoOrderAmounts(value: unknown) {
     commissionBase: paid,
   }
 }
+/** 淘宝佣金结算：tk_status 3 已结算（tk_earning_time 为结算时间），13 已失效，其余未结算 */
+export function taobaoOrderSettlement(value: unknown) {
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const status = String(raw.tk_status ?? '')
+  if (status === '13') return { state: 'INVALID' as const, settledAt: null }
+  if (status === '3') {
+    const at = taobaoDate(raw.tk_earning_time)
+    return { state: 'SETTLED' as const, settledAt: at ? dateText(at) : null }
+  }
+  return { state: 'PENDING' as const, settledAt: null }
+}
 export function taobaoOrderImage(value: unknown): string | null {
   const img = (value as { item_img?: unknown } | null)?.item_img
   if (typeof img !== 'string' || !img) return null

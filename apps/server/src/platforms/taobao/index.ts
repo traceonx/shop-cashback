@@ -6,7 +6,7 @@ import { decimalCents, parseJdJson } from '../jd'
 import type { PlatformConfig, PlatformPlugin } from '../types'
 import { dateText } from '../../database'
 import { taobaoFields } from './config'
-import { queryTaobaoOrders, taobaoOrderAmounts, taobaoOrderImage, taobaoOrderStatus } from './orders'
+import { queryTaobaoOrders, taobaoOrderAmounts, taobaoOrderImage, taobaoOrderSettlement, taobaoOrderStatus } from './orders'
 
 const GATEWAY = 'https://eco.taobao.com/router/rest'
 const HOSTS = ['taobao.com', 'tmall.com', 'tmall.hk', 'tb.cn', 'yao.95095.com', 'liangxinyao.com']
@@ -253,6 +253,7 @@ export const taobaoPlugin: PlatformPlugin = {
   orderStatus: (code) => taobaoOrderStatus(code),
   orderAmounts: (raw) => taobaoOrderAmounts(raw),
   orderImage: (raw) => taobaoOrderImage(raw),
+  orderSettlement: (raw) => taobaoOrderSettlement(raw),
   async convert(c, url, _trackingCode, content) {
     if (!c.adzoneId) throw new BadRequestException('尚未保存推广位 PID，请到渠道配置填写')
     const link = await resolveShortLink(url).catch(() => ({ itemId: null, title: null }))

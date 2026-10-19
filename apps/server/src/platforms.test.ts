@@ -115,3 +115,16 @@ test('京东插件请求签名与分页保留、长订单号与金额规范化',
     globalThis.fetch = original
   }
 })
+
+test('佣金结算状态：京东按 payMonth、淘宝按 tk_status', async () => {
+  const { jdOrderSettlement } = await import('./platforms/jd')
+  const { taobaoOrderSettlement } = await import('./platforms/taobao/orders')
+  assert.deepEqual(jdOrderSettlement({ validCode: 17, payMonth: '20200120' }), { state: 'SETTLED', settledAt: '2020-01-20' })
+  assert.equal(jdOrderSettlement({ validCode: 17, payMonth: '29991231' }).state, 'PENDING')
+  assert.equal(jdOrderSettlement({ validCode: 17, payMonth: 0 }).state, 'PENDING')
+  assert.equal(jdOrderSettlement({ validCode: 16 }).state, 'PENDING')
+  assert.equal(jdOrderSettlement({ validCode: 3 }).state, 'INVALID')
+  assert.deepEqual(taobaoOrderSettlement({ tk_status: 3, tk_earning_time: '2026-10-20 10:00:00' }), { state: 'SETTLED', settledAt: '2026-10-20 10:00:00' })
+  assert.equal(taobaoOrderSettlement({ tk_status: 13 }).state, 'INVALID')
+  assert.equal(taobaoOrderSettlement({ tk_status: 12 }).state, 'PENDING')
+})
