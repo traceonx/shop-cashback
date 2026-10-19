@@ -117,6 +117,8 @@ test('短链跳转参数与分享文案：多层编码中找商品 ID、提取�
   assert.equal(idFromText('https://login.taobao.com/x?redirectURL=https%3a%2f%2fitem.taobao.com%2fwow%2fz%2fhome%3Frand%3Dabc'), null)
   assert.equal(shareTitle('【淘宝】https://e.tb.cn/h.abc?tk=x CZ321 「Mistine蜜丝婷小果泥唇霜」\n点击链接直接打开'), 'Mistine蜜丝婷小果泥唇霜')
   assert.equal(shareTitle('https://item.taobao.com/item.htm?id=1'), null)
+  assert.equal(shareTitle('【淘宝】https://m.tb.cn/h.j1E2Yyg?tk=SHiTTuBbca7 MF278 【李佳琦双11超级母婴节付定金】嫚熙秋冬月子服女士睡衣家居服 '), '嫚熙秋冬月子服女士睡衣家居服')
+  assert.equal(shareTitle('【淘宝】https://m.tb.cn/h.j2fsdxI?tk=Zls2TuB2N0o HU071 【李佳琦双11超级母婴节付定金】嫚熙含桑蚕丝莫代尔孕妇内裤高弹'), '嫚熙含桑蚕丝莫代尔孕妇内裤高弹')
 })
 
 test('详情接口失败时用分享文案标题走物料搜索', async () => {

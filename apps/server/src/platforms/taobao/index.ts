@@ -101,9 +101,16 @@ export function idFromText(text: string): string | null {
   return null
 }
 // 分享文案里「」中的商品标题（如：【淘宝】https://e.tb.cn/h.xxx CZ321 「商品标题」）
+// 另一种分享格式没有「」：【淘宝】https://m.tb.cn/h.xxx?tk=yyy MF278 【活动名】商品标题——取口令码之后的整段
 export function shareTitle(content?: string) {
-  const t = /「([^「」]{4,120})」/.exec(content || '')?.[1]?.trim()
-  return t || null
+  const text = content || ''
+  const t = /「([^「」]{4,120})」/.exec(text)?.[1]?.trim()
+  if (t) return t
+  const tail = /https?:\/\/\S+\s+[A-Z]{2}\d{3,4}\s+([^\n]{4,160})/.exec(text)?.[1]?.replace(/点击链接直接打开.*$|或者淘宝搜索直接打开.*$/, '')
+    // 去掉开头的活动标签（如【李佳琦双11超级母婴节付定金】），它不属于商品标题，会干扰物料搜索
+    .replace(/^(【[^】]{1,40}】\s*)+/, '')
+    .trim()
+  return tail && tail.length >= 4 ? tail.slice(0, 120) : null
 }
 // 短链落地页中的商品标题（<title> / og:title / "title":"..."），过滤登录、风控等通用标题
 export function titleFromHtml(html: string): string | null {
