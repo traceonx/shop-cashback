@@ -39,7 +39,11 @@ export function App() {
       <AppLayout onLogout={() => setSigned(false)} notify={notify}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          {(['orders', 'users', 'rebates', 'withdrawals', 'promotions'] as const).map((kind) => (
+          <Route path="/orders" element={<Navigate to="/orders/jd" replace />} />
+          {(['jd', 'taobao'] as const).map((p) => (
+            <Route key={p} path={`/orders/${p}`} element={<Records key={`orders-${p}`} kind="orders" platform={p} notify={notify} />} />
+          ))}
+          {(['users', 'rebates', 'withdrawals', 'promotions'] as const).map((kind) => (
             <Route key={kind} path={`/${kind}`} element={<Records key={kind} kind={kind} notify={notify} />} />
           ))}
           <Route path="/channels" element={<Channels />} />

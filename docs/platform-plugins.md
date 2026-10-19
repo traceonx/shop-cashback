@@ -1,6 +1,6 @@
 # 电商平台插件
 
-平台实现位于 `apps/server/src/platforms/<平台>/`，统一契约在 `types.ts`，注册表在 `registry.ts`。目前只注册京东；淘宝和拼多多没有伪实现。
+平台实现位于 `apps/server/src/platforms/<平台>/`，统一契约在 `types.ts`，注册表在 `registry.ts`。目前注册京东和淘宝；拼多多没有伪实现。
 
 每个插件声明平台名称、配置字段及密钥属性、认证方式、官方文档、历史查询范围和单次时间窗口，并实现配置可用性判断、商品链接校验、转链、订单权限测试和分页订单查询。平台调用返回统一的商品快照或订单行，原始响应同时保留用于核对。签名、请求参数、分页和响应规范化均由插件负责。
 
@@ -52,6 +52,14 @@
 任务及分页游标持久保存于 PostgreSQL。每两秒处理一页，通过条件更新领取任务；进程中断后超过两分钟可重新领取。导入和游标推进在同一事务内提交。重复订单按平台、账号、订单号、订单行号更新。失败显示错误并保留已经导入的记录，可重新选择范围同步。九十天至少有 2160 个时间窗口，需要较长时间，可离开页面等待。
 
 京东插件将 validCode 3 / 15 / 16 / 17 分别映射为已取消 / 待付款 / 已付款 / 已完成，其他未映射状态保留待核实。交易状态与返现用户归属分开。计佣基数不能当作订单原价或实付金额，不能凭插件响应自动给用户入账。
+
+## 淘宝订单同步
+
+- 代码：`apps/server/src/platforms/taobao/orders.ts`。官方 `taobao.tbk.order.details.get`：最近一小时用 `query_type=4`（更新时间），历史回补用 `query_type=1`（创建时间）；单窗口 3 小时；第 2 页起回传上一页的 `position_index`（按窗口暂存在内存，进程重启后不带位点继续）；`order_scene=1` 常规订单。
+- 官方返回错误码 11（未开通订单权限）时，1 小时内直接改用喵有券 [tbkOrderDetailsGet](https://www.ecapi.cn/index/index/openapi/id/83.shtml?ptype=1)（付费会员接口，字段与官方一致，需「淘宝联盟 · 喵有券」的 apkey 与 tbname，开关可不开；淘宝授权 30 天有效）。
+- 映射：订单号 `trade_parent_id`，订单行 `trade_id`（TOP 响应按原文解析，超过 2^53 的整数保留为字符串）；状态 12 已付款、13 已失效、14 确认收货、3 已结算；佣金 13 记 0、3 取 `pub_share_fee`、其余取 `pub_share_pre_fee`；付款金额 `alipay_total_price`；下单时间 `tk_create_time`（北京时间），结算时间 `tk_earning_time`。
+- 用户归属：尚未接入渠道 ID（relation_id）/ 会员运营 ID（special_id），订单没有可靠的用户标识；淘宝转链记录也不存商品 ID，按商品兜底不会命中。订单全部进入「未关联用户」，在后台手动关联，不推送订单通知。接入渠道备案后改按 relation_id 归属。
+- 后台：订单管理拆为「京东订单」「淘宝订单」子菜单（`/orders/jd`、`/orders/taobao`），`GET /orders?platform=`、`GET /orders/sync-status?platform=`、`POST /orders/sync {platform, hours}` 按平台；不传 platform 时同步所有已配置的联盟。
 
 ## 验证
 

@@ -168,10 +168,14 @@ export async function convert(content: string, actor: string, trace: string, use
     throw e
   }
 }
-export async function listOrders() {
+export async function listOrders(platformId?: string) {
   const defaults = await settings()
   return (
-    await db.affiliateOrder.findMany({ include: { user: true, items: true }, orderBy: { placedAt: 'desc' } })
+    await db.affiliateOrder.findMany({
+      where: platformId ? { platform: platformId } : {},
+      include: { user: true, items: true },
+      orderBy: { placedAt: 'desc' },
+    })
   ).map((o) => {
     const snapshot = o.ruleSnapshot as { basisPoints?: number } | null
     const values = platform(o.platform).orderAmounts(o.rawData)

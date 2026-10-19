@@ -99,6 +99,31 @@
 .nav-link.active svg {
   color: #fff;
 }
+/* 子菜单：父项为按钮，展开后子项缩进显示 */
+.nav-parent {
+  width: calc(100% - 18px);
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-parent.current,
+.nav-parent.current svg {
+  color: var(--c-primary);
+}
+.nav-caret {
+  margin-left: auto;
+  transition: transform 0.15s;
+}
+.nav-group.open .nav-caret {
+  transform: rotate(90deg);
+}
+.nav-child {
+  height: 38px;
+  padding-left: 56px;
+  font-size: 14px;
+}
 .nav-badge {
   margin-left: auto;
   width: 8px;

@@ -126,8 +126,11 @@ function ago(at?: string | null) {
   return s < 60 ? `${s} 秒前` : s < 3600 ? `${Math.floor(s / 60)} 分钟前` : `${Math.floor(s / 3600)} 小时前`
 }
 
-export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) {
+/** platform：订单管理按平台拆成子菜单（京东订单 / 淘宝订单），列表、同步与同步状态都只针对该平台 */
+export function Records({ kind, notify, platform }: { kind: RecordKind; notify: Notify; platform?: 'jd' | 'taobao' }) {
   const { columns: allColumns } = config[kind]
+  const qs = kind === 'orders' && platform ? `?platform=${platform}` : ''
+  const listUrl = `/${kind}${qs}`
   const columns = allColumns.filter((c) => !c[2])
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
@@ -144,13 +147,13 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
     setLoading(true)
     setError('')
     try {
-      setRows(await api<Row[]>(`/${kind}`))
+      setRows(await api<Row[]>(listUrl))
     } catch (e) {
       setError(errorText(e))
     } finally {
       setLoading(false)
     }
-  }, [kind])
+  }, [listUrl])
   useEffect(() => {
     void load()
   }, [load])
@@ -163,13 +166,13 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
     let seen = ''
     const poll = async () => {
       try {
-        const job = await api<SyncState>('/orders/sync-status')
+        const job = await api<SyncState>(`/orders/sync-status${qs}`)
         if (!alive) return
         setSync(job)
         // 同步过程中导入了新订单或任务完成时，立即刷新列表
         const mark = job ? `${job.id}:${job.count}:${job.status}` : ''
         if (job && mark !== seen && (job.count > 0 || job.status === 'COMPLETED')) {
-          if (seen) setRows(await api<Row[]>('/orders'))
+          if (seen) setRows(await api<Row[]>(listUrl))
         }
         seen = mark
       } catch {
@@ -182,7 +185,7 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
       alive = false
       clearInterval(timer)
     }
-  }, [kind])
+  }, [kind, qs, listUrl])
 
   const filtered = useMemo(
     () =>
@@ -201,8 +204,8 @@ export function Records({ kind, notify }: { kind: RecordKind; notify: Notify }) 
   async function startSync(hours = '1') {
     setSyncing(true)
     try {
-      const r = await api<{ message: string }>('/orders/sync', { method: 'POST', body: JSON.stringify({ platform: 'jd', hours: Number(hours) }) })
-      setSync(await api<SyncState>('/orders/sync-status'))
+      const r = await api<{ message: string }>('/orders/sync', { method: 'POST', body: JSON.stringify({ platform, hours: Number(hours) }) })
+      setSync(await api<SyncState>(`/orders/sync-status${qs}`))
       notify(r.message)
     } catch (e) {
       setError(errorText(e))

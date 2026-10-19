@@ -81,15 +81,37 @@ export async function startOrderSync(
     return { id: job.id, message: '同步任务已开始，可离开页面，后台将分时段拉取。' }
   })
 }
-export async function orderSyncStatus() {
-  const job = await db.syncJob.findFirst({
-    where: { cursor: { path: ['engine'], equals: 'platform-v1' } },
-    orderBy: { createdAt: 'desc' },
-  })
+/** 手动同步未指定平台时：对所有已接入订单同步且已配置凭证的平台各开一个任务 */
+export async function startAllOrderSync(actor: string, trace: string, hours?: number) {
+  const started: string[] = [],
+    skipped: string[] = []
+  for (const plugin of listPlatforms()) {
+    if (plugin.orderSync === false || !plugin.configured(await readConfig(plugin.id))) {
+      skipped.push(plugin.name)
+      continue
+    }
+    await startOrderSync(actor, trace, { platform: plugin.id, hours })
+    started.push(plugin.name)
+  }
+  if (!started.length) throw new BadRequestException('没有可同步订单的联盟，请先在联盟配置中保存应用凭证')
+  return { message: `已开始同步${started.join('、')}订单，可离开页面，后台将分时段拉取。${skipped.length ? `（${skipped.join('、')}未配置，已跳过）` : ''}` }
+}
+export async function orderSyncStatus(platformId?: string) {
+  const scope = platformId ? { AND: [{ cursor: { path: ['engine'], equals: 'platform-v1' } }, { cursor: { path: ['platform'], equals: platformId } }] } : { cursor: { path: ['engine'], equals: 'platform-v1' } }
+  // 多个平台同时同步时优先展示进行中或失败的任务
+  const job =
+    (await db.syncJob.findFirst({
+      where: { ...scope, status: { in: ['QUEUED', 'RUNNING'] } },
+      orderBy: { createdAt: 'asc' },
+    })) ||
+    (await db.syncJob.findFirst({
+      where: scope,
+      orderBy: { createdAt: 'desc' },
+    }))
   if (!job) return null
   const c = job.cursor as unknown as Cursor
   const last = await db.syncJob.findFirst({
-    where: { status: 'COMPLETED', cursor: { path: ['engine'], equals: 'platform-v1' } },
+    where: { ...scope, status: 'COMPLETED' },
     orderBy: { finishedAt: 'desc' },
     select: { finishedAt: true },
   })

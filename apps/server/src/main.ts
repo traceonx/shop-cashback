@@ -41,7 +41,7 @@ import { getMenu, saveMenu, publishMenu, republishStaleMenu } from './wecom-menu
 import { env, requireEnv } from './config'
 import { hashPassword, verifyPassword } from './security'
 import * as business from './business'
-import { startOrderSync, orderSyncStatus, processOrderSync } from './order-sync'
+import { startOrderSync, startAllOrderSync, orderSyncStatus, processOrderSync } from './order-sync'
 import { startAutoSync } from './auto-sync'
 import { platform, listPlatforms } from './platforms/registry'
 import { integrationStatus, saveConfig, testConnection, readConfig, isThirdParty, type Provider } from './integrations'
@@ -340,8 +340,9 @@ class AdminController {
       throw new BadRequestException('请输入有效商品链接')
     return { data: await business.convert(body.content, req.actor!.id, req.traceId!) }
   }
-  @Get('orders') async orders() {
-    return { data: await business.listOrders() }
+  @Get('orders') async orders(@Query('platform') platformId?: string) {
+    if (platformId) platform(platformId)
+    return { data: await business.listOrders(platformId || undefined) }
   }
   @Get('platforms') plugins() {
     return {
@@ -354,11 +355,12 @@ class AdminController {
       })),
     }
   }
-  @Get('orders/sync-status') syncStatus() {
-    return orderSyncStatus().then((data) => ({ data }))
+  @Get('orders/sync-status') syncStatus(@Query('platform') platformId?: string) {
+    if (platformId) platform(platformId)
+    return orderSyncStatus(platformId || undefined).then((data) => ({ data }))
   }
   @Post('orders/sync') async sync(@Req() req: AuthRequest, @Body() body: { platform?: string; hours?: number }) {
-    return { data: await startOrderSync(req.actor!.id, req.traceId!, body || {}) }
+    return { data: body?.platform ? await startOrderSync(req.actor!.id, req.traceId!, body) : await startAllOrderSync(req.actor!.id, req.traceId!, body?.hours) }
   }
   @Get('rebates') async rebates() {
     return {

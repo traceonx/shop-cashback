@@ -30,13 +30,21 @@ import { UserAvatar } from './UserAvatar'
 import { LogViewer } from '../pages/LogViewer'
 import { Conversion } from '../pages/Conversion'
 
-type NavItem = { path: string; label: string; icon: LucideIcon }
+type NavItem = { path: string; label: string; icon: LucideIcon; children?: { path: string; label: string }[] }
 export const navigation: { title?: string; items: NavItem[] }[] = [
   { items: [{ path: '/', label: '数据概览', icon: LayoutDashboard }] },
   {
     title: '业务',
     items: [
-      { path: '/orders', label: '订单管理', icon: ShoppingCart },
+      {
+        path: '/orders',
+        label: '订单管理',
+        icon: ShoppingCart,
+        children: [
+          { path: '/orders/jd', label: '京东订单' },
+          { path: '/orders/taobao', label: '淘宝订单' },
+        ],
+      },
       { path: '/users', label: '用户管理', icon: Users },
       { path: '/rebates', label: '返现流水', icon: Wallet },
       { path: '/withdrawals', label: '提现审核', icon: Banknote },
@@ -79,12 +87,16 @@ export function AppLayout({ onLogout, notify, children }: { onLogout: () => void
           {navigation.map((group, i) => (
             <div key={i}>
               {group.title && <div className="nav-section">{group.title}</div>}
-              {group.items.map(({ path, label, icon: Icon }) => (
-                <NavLink key={path} to={path} end={path === '/'} className="nav-link">
-                  <Icon size={22} strokeWidth={1.8} />
-                  <span>{label}</span>
-                </NavLink>
-              ))}
+              {group.items.map((item) =>
+                item.children ? (
+                  <NavGroup key={item.path} item={item} />
+                ) : (
+                  <NavLink key={item.path} to={item.path} end={item.path === '/'} className="nav-link">
+                    <item.icon size={22} strokeWidth={1.8} />
+                    <span>{item.label}</span>
+                  </NavLink>
+                ),
+              )}
             </div>
           ))}
         </nav>
@@ -108,6 +120,35 @@ export function AppLayout({ onLogout, notify, children }: { onLogout: () => void
       </div>
       {logs && <LogViewer onClose={() => setLogs(false)} />}
       {converting && <Conversion notify={notify} onClose={() => setConverting(false)} />}
+    </div>
+  )
+}
+
+/** 带子菜单的导航项：点击展开 / 收起，当前页面在子菜单内时自动展开并高亮父项 */
+function NavGroup({ item }: { item: NavItem }) {
+  const location = useLocation()
+  const inside = location.pathname === item.path || location.pathname.startsWith(item.path + '/')
+  const [open, setOpen] = useState(inside)
+  useEffect(() => {
+    if (inside) setOpen(true)
+  }, [inside])
+  const Icon = item.icon
+  return (
+    <div className={cx('nav-group', open && 'open')}>
+      <button type="button" className={cx('nav-link', 'nav-parent', inside && 'current')} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon size={22} strokeWidth={1.8} />
+        <span>{item.label}</span>
+        <ChevronRight size={16} className="nav-caret" />
+      </button>
+      {open && (
+        <div className="nav-children">
+          {item.children!.map((c) => (
+            <NavLink key={c.path} to={c.path} className="nav-link nav-child">
+              <span>{c.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

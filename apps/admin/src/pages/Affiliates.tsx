@@ -25,7 +25,7 @@ const meta: Record<
   },
   taobao: {
     name: '淘宝联盟',
-    description: '商品转链、淘口令',
+    description: '商品转链、淘口令、订单同步',
     doc: 'https://developer.alibaba.com/docs/api.htm?apiId=65409',
     testLabel: '测试接口权限',
     fields: [
@@ -34,7 +34,7 @@ const meta: Record<
       { key: 'pid', hint: '完整 PID，如 mm_1_2_3，保存时自动提取推广位 ID', icon: Tag },
       { key: 'adzoneId', hint: '由 PID 自动提取', icon: Hash, readOnly: true },
     ],
-    steps: ['未开通万能转链时自动按分享标题搜索转链', '同名商品多家店铺在卖时不转链，避免串店', '订单同步需另行申请订单查询权限'],
+    steps: ['未开通万能转链时自动按分享标题搜索转链', '同名商品多家店铺在卖时不转链，避免串店', '订单同步：优先官方订单查询；未开通时自动改用喵有券查询（需配置「淘宝联盟 · 喵有券」，开关可不开）'],
   },
 }
 
