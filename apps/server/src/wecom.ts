@@ -327,7 +327,7 @@ export async function processInbox() {
               `预计返现：${p.rebate != null ? yuan(p.rebate) : '待确认'}`,
               !known && p.infoMessage ? `商品信息未获取：${p.infoMessage}` : null,
               p.password ? `淘口令：${p.password}` : null,
-              p.password ? '👉 点击卡片购买，或复制下一条消息打开手机淘宝' : '👉 点击卡片前往购买',
+              p.password ? '👉 点击卡片购买，或复制下一条消息打开手机淘宝' : `👉 点击链接购买：${p.promotionUrl}`,
             ].filter(Boolean).join('\n'),
             url: p.promotionUrl,
             picurl: p.imageUrl || undefined,
@@ -347,7 +347,13 @@ export async function processInbox() {
         if (typeof reply === 'string') throw e
         // 图文发送失败时退回纯文本，保证用户能拿到链接
         console.warn(`[企业微信] 图文消息发送失败，改发文本：${e instanceof Error ? e.message : e}`)
-        await send(wecom, sender, `${reply.title}\n${reply.description.replace('👉 点击卡片前往购买', '')}推广链接：${reply.url}`)
+        await send(
+          wecom,
+          sender,
+          reply.description.includes(reply.url)
+            ? `${reply.title}\n${reply.description}`
+            : `${reply.title}\n${reply.description}\n推广链接：${reply.url}`,
+        )
       }
       const summary = (typeof reply === 'string' ? reply : `[图文] ${reply.title}`).replace(/\s+/g, ' ').slice(0, 60)
       console.log(`[企业微信] 已回复 ${sender}：${summary}`)
