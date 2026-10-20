@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { dateTime, errorText } from '../lib/format'
 import { Alert, Button, Chip, Select, SplitButton, Switch, TextArea, TextField, confirm } from '../ui'
 import type { useIntegration } from './integration'
+import { TaobaoWebPanel } from './TaobaoWebPanel'
 
 type Source = 'official-sc' | 'official' | 'ecapi'
 const sources: [Source, string][] = [
@@ -133,6 +134,7 @@ export function TaobaoOrderPanel({ it }: { it: ReturnType<typeof useIntegration>
   const running = sync && ['QUEUED', 'RUNNING'].includes(sync.status)
   return (
     <div className="stack">
+      <TaobaoWebPanel it={it} />
       <Select<Source>
         label="订单数据源"
         hint="与转链数据源分开配置；切换数据源不会重复入库（按订单号与子订单号去重）"

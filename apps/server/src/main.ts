@@ -50,6 +50,7 @@ import { startAutoSync } from './auto-sync'
 import { platform, listPlatforms } from './platforms/registry'
 import { integrationStatus, saveConfig, testConnection, readConfig, isThirdParty, type Provider } from './integrations'
 import { topRequest } from './platforms/taobao'
+import { webStatus, startWebLogin, importWebLogin, disconnectWeb, webProbe, webMaintenance } from './platforms/taobao/web'
 import { authStatus as taobaoAuthStatus, dbOAuthStore, handleCallback as handleTaobaoCallback, startAuthorize as startTaobaoAuthorize } from './platforms/taobao/oauth'
 import { decryptCallback, receiveCallback, processInbox } from './wecom'
 import { version as appVersion, versionText } from './version'
@@ -108,6 +109,10 @@ function validatePassword(password: unknown) {
 const dummyHash = hashPassword(randomUUID())
 @Controller('api/v1')
 class PublicController {
+  @Post('callbacks/taobao/web-session') async taobaoWebImport(@Req() req: Request, @Body() body: { cookies?: unknown }) {
+    const token = req.headers.authorization?.replace(/^Bearer /, '') || ''
+    return { data: await importWebLogin(token, body.cookies) }
+  }
   @Get('health') async health() {
     try {
       await db.$queryRaw`SELECT 1`
@@ -390,6 +395,16 @@ class AdminController {
   @Get('integrations/taobao/oauth') async taobaoOAuthStatus() {
     return { data: await taobaoAuthStatus(dbOAuthStore(), await readConfig('taobao')) }
   }
+  @Get('integrations/taobao/web') async taobaoWebStatus() { return { data: await webStatus() } }
+  @Post('integrations/taobao/web/login') async taobaoWebLogin() { return { data: await startWebLogin() } }
+  @Post('integrations/taobao/web/verify') async taobaoWebVerify() {
+    await webProbe(true)
+    return { data: await webStatus() }
+  }
+  @Delete('integrations/taobao/web') async taobaoWebDisconnect() {
+    await disconnectWeb()
+    return { data: { ok: true } }
+  }
   @Post('integrations/taobao/oauth/start') async taobaoOAuthStart(@Req() req: AuthRequest) {
     if (req.actor!.role !== 'SUPER_ADMIN') throw new ForbiddenException('仅超级管理员可发起授权')
     const data = await startTaobaoAuthorize(dbOAuthStore(), await readConfig('taobao'), req.actor!.id)
@@ -637,6 +652,7 @@ async function bootstrap() {
   orderTimer.unref()
   // 自动同步最近订单：按转链活跃度在 15 秒～10 分钟之间动态调整间隔
   startAutoSync()
+  setInterval(() => void webMaintenance().catch(() => console.warn('淘宝网页备用通道维护失败')), 60000).unref()
   // 清理企业微信菜单里已下线的入口（如订单找回）
   setTimeout(() => void republishStaleMenu().catch(() => undefined), 30000).unref()
   // 自动更新（默认关闭）：每分钟对齐整分检查一次 cron 是否命中

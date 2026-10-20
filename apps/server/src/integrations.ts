@@ -111,6 +111,11 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
     }
   }
   if (kind === 'taobao') {
+    if (next.webMode && !['off', 'manual', 'auto'].includes(next.webMode)) throw new BadRequestException('网页备用模式无效')
+    for (const [key, min, max] of [['webRpm', 1, 20], ['webHealthMinutes', 5, 1440], ['webLookbackDays', 1, 90]] as const) {
+      if (next[key] && (!Number.isInteger(Number(next[key])) || Number(next[key]) < min || Number(next[key]) > max))
+        throw new BadRequestException(`${key} 应为 ${min}～${max} 的整数`)
+    }
     if (next.orderSource && !['official-sc', 'official', 'ecapi'].includes(next.orderSource)) throw new BadRequestException('订单数据源无效')
     if (next.autoMatch && !['true', 'false'].includes(next.autoMatch)) throw new BadRequestException('自动关联开关无效')
     if (next.perUserAdzone && !['true', 'false'].includes(next.perUserAdzone)) throw new BadRequestException('独立推广位开关无效')

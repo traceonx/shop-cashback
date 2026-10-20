@@ -396,8 +396,10 @@ export const taobaoPlugin: PlatformPlugin = {
     return `签名与 AppKey 验证通过。商品详情：${detail}；物料搜索：${search}；万能转链：${convert}；淘口令：${tpwd}；长链转短链：${spread}；推广者订单查询（taobao.tbk.order.details.get）：${orders === '可用' ? '可用' : '未开通（订单数据源可改选「官方账号授权」或「喵有券」）'}。${route}`
   },
   async queryOrders(c, request) {
+    const { withWebFallback, queryWebOrders } = await import('./web')
+    if (request.position?.startsWith('web:')) return queryWebOrders(c, request)
     const deps = orderDeps(c)
     const source = orderSourceOf(c, !!(await deps.ecapi!()))
-    return queryTaobaoOrders({ ...c, orderSource: source }, request, deps)
+    return withWebFallback(c, () => queryTaobaoOrders({ ...c, orderSource: source }, request, deps), () => queryWebOrders(c, request))
   },
 }

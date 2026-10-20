@@ -111,6 +111,13 @@ async function send(c: Config, user: string, content: string | News) {
   if (!r.ok || data.errcode !== 0 || data.invaliduser)
     throw new Error(data.invaliduser ? `接收人无效：${data.invaliduser}` : wecomError('消息发送失败', data))
 }
+export async function notifyAdmin(content: string) {
+  const c = await readConfig('wecom')
+  if (c.enabled === 'false' || !c.corpId || !c.secret || !c.agentId || !c.adminUserId ||
+    c.adminUserId === '@all' || /[|,;]/.test(c.adminUserId))
+    throw new Error('请配置一个有效的企业微信管理员 UserID')
+  await send(c, c.adminUserId, content)
+}
 const yuan = (cents: number | null | undefined) => (cents == null ? '待确认' : `¥${(cents / 100).toFixed(2)}`)
 
 export type OrderEvent = {

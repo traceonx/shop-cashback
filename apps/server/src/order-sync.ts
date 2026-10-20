@@ -6,6 +6,9 @@ import { notifyOrder, type OrderEvent } from './wecom'
 import { ownerBySku } from './attribution'
 import { dbPositionStore } from './platforms/jd/positions'
 import { ownerByTaobaoProduct } from './attribution-taobao'
+import { mergeTaobaoRaw } from './platforms/taobao/web-core'
+import { normalizeTaobaoOrder } from './platforms/taobao/orders'
+import { queryWebOrders } from './platforms/taobao/web'
 
 type Cursor = {
   engine: 'platform-v1'
@@ -22,6 +25,8 @@ type Cursor = {
   position?: string | null
   /** 自动同步生成的任务（定期清理） */
   auto?: boolean
+  /** 网页任务固定来源，后续时段按自然日扫描，不与官方 20 分钟游标混用。 */
+  web?: boolean
 }
 /**
  * 订单状态变化对应的用户通知：
@@ -168,14 +173,25 @@ async function processOrderStep(): Promise<boolean> {
     try {
       const c = job.cursor as unknown as Cursor,
         plugin = platform(c.platform),
-        from = new Date(c.next),
-        until = new Date(Math.min(from.getTime() + plugin.maxWindowMs, new Date(c.until).getTime()))
+        from = new Date(c.next)
+      const config = await readConfig(c.platform)
+      let until = new Date(Math.min(from.getTime() + (c.web ? 86400000 : plugin.maxWindowMs), new Date(c.until).getTime()))
       if (c.page > 10000) throw new BadRequestException('单时段分页超限，已停止；已导入数据保留')
-      const page = await plugin.queryOrders(await readConfig(c.platform), { from, until, page: c.page, type: c.type, position: c.position ?? null })
-      if (page.hasMore && !page.rows.length)
+      const request = { from, until, page: c.page, type: c.type, position: c.position ?? null, webUntil: new Date(c.until) }
+      const page = c.web ? await queryWebOrders(config, request) : await plugin.queryOrders(config, request)
+      const web = c.web || page.source === 'taobao-web'
+      if (web) {
+        // 网页返回整个自然日。增量回溯已覆盖全部配置日期，不再重复执行三个 20 分钟分段。
+        const lastDay = new Date(until.getTime() - 1 + 8 * 3600000).toISOString().slice(0, 10)
+        until = c.type === 3 ? new Date(c.until) : new Date(Math.min(
+          new Date(lastDay + 'T00:00:00+08:00').getTime() + 86400000, new Date(c.until).getTime(),
+        ))
+      }
+      if (page.hasMore && !page.rows.length && !page.position?.startsWith('web:'))
         throw new BadRequestException('平台返回空页但仍有下一页，已停止以免遗漏订单')
       const next: Cursor = {
         ...c,
+        ...(web ? { web: true, total: c.type === 3 ? c.windows + 1 : c.windows + 1 + Math.ceil((new Date(c.until).getTime() - until.getTime()) / 86400000) } : {}),
         count: c.count + page.rows.length,
         page: page.hasMore ? c.page + 1 : 1,
         position: page.hasMore ? (page.position ?? null) : null,
@@ -233,8 +249,12 @@ async function processOrderStep(): Promise<boolean> {
                   externalLineId: row.lineId,
                 },
               },
-              select: { userId: true, status: true, attribution: true },
+              select: { userId: true, status: true, attribution: true, rawData: true },
             })
+            if (plugin.id === 'taobao' && existing?.rawData) {
+              // 网页常缺商品 ID / 结算日期等字段；合并后重新计算金额，不能用 null 擦掉官方结果。
+              Object.assign(row, normalizeTaobaoOrder(mergeTaobaoRaw(existing.rawData, row.raw)))
+            }
             // 优先用联盟回传的用户标识；未回传时按「下单前谁转过这个商品」匹配，仅唯一时关联
             const owner = promotion
               ? tracking!.userId

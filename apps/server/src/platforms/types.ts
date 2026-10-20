@@ -67,6 +67,6 @@ export interface PlatformPlugin {
   queryOrders(
     config: PlatformConfig,
     /** position：上一页返回的翻页位点（淘宝 position_index），由同步任务持久化，重启后可继续 */
-    request: { from: Date; until: Date; page: number; type: 1 | 3; position?: string | null },
-  ): Promise<{ rows: PlatformOrder[]; hasMore: boolean; position?: string | null }>
+    request: { from: Date; until: Date; page: number; type: 1 | 3; position?: string | null; webUntil?: Date },
+  ): Promise<{ rows: PlatformOrder[]; hasMore: boolean; position?: string | null; source?: string }>
 }

@@ -7,6 +7,7 @@ import { readConfig } from './integrations'
 import { platformForContent, platform } from './platforms/registry'
 import { ECAPI_KIND, ecapiConvert, ecapiEnabled } from './platforms/jd/ecapi'
 import { TB_ECAPI_KIND, tbEcapiEnabled, tbHybridConvert } from './platforms/taobao/ecapi'
+import { convertWeb, withWebFallback } from './platforms/taobao/web'
 import { dbPositionStore, ensureUserPosition, parsePositionPool } from './platforms/jd/positions'
 import { TAOBAO_ACCOUNT, dbAdzoneStore, ensureUserAdzone, isAdzoneCode, perUserAdzoneEnabled, userPid } from './platforms/taobao/adzones'
 
@@ -176,11 +177,14 @@ export async function convert(content: string, actor: string, trace: string, use
     },
   })
   try {
-    const { link, snapshot } = !useThird
+    const primary = async () => !useThird
       ? await plugin.convert(conf, url, trackingCode || undefined, content)
       : plugin.id === 'jd'
         ? await ecapiConvert(thirdConf!, url, trackingCode || undefined)
         : await tbHybridConvert(conf, third!, url, content)
+    const { link, snapshot } = plugin.id === 'taobao'
+      ? await withWebFallback(conf, primary, () => convertWeb(conf, content))
+      : await primary()
     if (notices.length) snapshot.infoMessage = [...notices, snapshot.infoMessage].filter(Boolean).join('；')
     const rule = userId ? await db.rebateRule.findFirst({ where: { scopeKey: 'user:' + userId } }) : null
     const basisPoints = rule?.basisPoints ?? Math.round((await settings()).ratio * 100)
