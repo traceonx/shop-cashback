@@ -8,7 +8,7 @@ import { platformForContent, platform } from './platforms/registry'
 import { ECAPI_KIND, ecapiConvert, ecapiEnabled } from './platforms/jd/ecapi'
 import { TB_ECAPI_KIND, tbEcapiEnabled, tbHybridConvert } from './platforms/taobao/ecapi'
 import { dbPositionStore, ensureUserPosition, parsePositionPool } from './platforms/jd/positions'
-import { dbAdzoneStore, ensureUserAdzone, perUserAdzoneEnabled, userPid } from './platforms/taobao/adzones'
+import { TAOBAO_ACCOUNT, dbAdzoneStore, ensureUserAdzone, isAdzoneCode, perUserAdzoneEnabled, userPid } from './platforms/taobao/adzones'
 
 export async function settings() {
   const row = await db.systemConfig.findUnique({ where: { key: 'rules' } })
@@ -70,9 +70,13 @@ export async function trends(days: number) {
 }
 export async function listUsers() {
   const list = await db.user.findMany({
-    include: { identities: true, wallet: true, _count: { select: { promotions: true, orders: true } } },
+    include: { identities: true, wallet: true, tracking: true, _count: { select: { promotions: true, orders: true } } },
     orderBy: { createdAt: 'desc' },
   })
+  // 用户绑定的推广位：淘宝存于 user_tracking_codes（推广位 ID），京东存于 system_configs（jd-position-user:<用户>）
+  const taobao = await readConfig('taobao')
+  const jdRows = await db.systemConfig.findMany({ where: { key: { startsWith: 'jd-position-user:' } } })
+  const jdPosition = new Map(jdRows.map((r) => [r.key.slice('jd-position-user:'.length), String((r.value as any)?.positionId ?? '')]))
   const rules = await db.rebateRule.findMany()
   const defaults = await settings()
   return list.map((u) => ({
@@ -82,6 +86,11 @@ export async function listUsers() {
     channel: '企业微信',
     conversions: u._count.promotions,
     orders: u._count.orders,
+    taobaoPid: (() => {
+      const code = u.tracking.find((t) => t.accountId === TAOBAO_ACCOUNT)?.code
+      return isAdzoneCode(code) ? userPid(taobao, code) || code : null
+    })(),
+    jdPosition: jdPosition.get(u.id) || null,
     total: centsNumber(u.wallet?.totalCents) || 0,
     balance: centsNumber(u.wallet?.availableCents) || 0,
     ratio: (rules.find((r) => r.scopeKey === `user:${u.id}`)?.basisPoints ?? defaults.ratio * 100) / 100,

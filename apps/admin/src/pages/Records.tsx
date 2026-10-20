@@ -45,6 +45,8 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
       ['channel', '来源'],
       ['conversions', '转链次数'],
       ['orders', '订单数'],
+      ['taobaoPid', '淘宝 PID'],
+      ['jdPosition', '京东推广位'],
       ['balance', '可提现余额'],
       ['ratio', '返现比例', true],
       ['status', '状态'],
@@ -75,7 +77,7 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
   },
 }
 const moneyKeys = ['price', 'rebate', 'amount', 'paidAmount', 'commission', 'balance', 'before', 'after']
-const monoKeys = ['id', 'externalOrderId']
+const monoKeys = ['id', 'externalOrderId', 'taobaoPid', 'jdPosition']
 const PAGE_SIZE = 10
 
 /** 单元格渲染（列表与详情共用） */
@@ -113,7 +115,9 @@ function cell(kind: RecordKind, key: string, r: Row) {
   if (v == null || v === '')
     return (
       <span className="text-faint">
-        {key === 'settledAt' && r.settlement === 'PENDING'
+        {key === 'taobaoPid' || key === 'jdPosition'
+          ? '未绑定'
+          : key === 'settledAt' && r.settlement === 'PENDING'
           ? '未结算'
           : key === 'completedAt' && r.status !== 'CANCELLED'
             ? // 淘宝订单接口不返回确认收货时间
