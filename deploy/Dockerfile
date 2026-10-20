@@ -15,7 +15,7 @@ RUN npm run build
 
 FROM node:22-alpine AS app
 # 内置 PostgreSQL：未设置 DATABASE_URL 时单容器运行；设置后连接外部数据库。
-RUN apk add --no-cache openssl postgresql16 postgresql16-client su-exec acl
+RUN apk add --no-cache openssl postgresql16 postgresql16-client su-exec acl chromium font-noto-cjk
 ARG APP_VERSION= GIT_SHA=dev BUILD_TIME=
 ENV APP_VERSION=$APP_VERSION GIT_SHA=$GIT_SHA BUILD_TIME=$BUILD_TIME
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3001 ADMIN_DIST=/app/public DATA_DIR=/app/data \

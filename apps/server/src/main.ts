@@ -49,9 +49,8 @@ import { startOrderSync, startAllOrderSync, orderSyncStatus, processOrderSync } 
 import { startAutoSync } from './auto-sync'
 import { platform, listPlatforms } from './platforms/registry'
 import { integrationStatus, saveConfig, testConnection, readConfig, isThirdParty, type Provider } from './integrations'
-import { topRequest } from './platforms/taobao'
-import { webStatus, startWebLogin, importWebLogin, disconnectWeb, webProbe, webMaintenance } from './platforms/taobao/web'
-import { authStatus as taobaoAuthStatus, dbOAuthStore, handleCallback as handleTaobaoCallback, startAuthorize as startTaobaoAuthorize } from './platforms/taobao/oauth'
+import { webStatus, disconnectWeb, webProbe, webMaintenance } from './platforms/taobao/web'
+import { startBrowserLogin, cancelBrowserLogin, browserLoginStatus, browserLoginScreenshot, browserLoginClick } from './platforms/taobao/web-browser'
 import { decryptCallback, receiveCallback, processInbox } from './wecom'
 import { version as appVersion, versionText } from './version'
 import { updateStatus, startUpdate, setAutoUpdate, autoUpdateTick } from './update'
@@ -109,10 +108,6 @@ function validatePassword(password: unknown) {
 const dummyHash = hashPassword(randomUUID())
 @Controller('api/v1')
 class PublicController {
-  @Post('callbacks/taobao/web-session') async taobaoWebImport(@Req() req: Request, @Body() body: { cookies?: unknown }) {
-    const token = req.headers.authorization?.replace(/^Bearer /, '') || ''
-    return { data: await importWebLogin(token, body.cookies) }
-  }
   @Get('health') async health() {
     try {
       await db.$queryRaw`SELECT 1`
@@ -187,26 +182,6 @@ class PublicController {
         name: admin.username,
       },
     }
-  }
-  /**
-   * 淘宝授权回调：校验一次性 state 后用 code 换取凭证并加密保存。
-   * 只跳回固定的后台页面，不接受任何跳转参数；code、凭证都不出现在跳转地址和日志里。
-   */
-  @Get('callbacks/taobao/oauth') async taobaoOAuth(@Req() req: AuthRequest, @Res() res: Response) {
-    const q = rawQuery(req.originalUrl)
-    let result: Awaited<ReturnType<typeof handleTaobaoCallback>>
-    try {
-      result = await handleTaobaoCallback(dbOAuthStore(), await readConfig('taobao'), q, (c, method, biz) => topRequest(c, method, biz), async (actorId) => {
-        const admin = await db.adminUser.findUnique({ where: { id: actorId }, include: { role: true } })
-        return !!admin?.enabled && admin.role.name === 'SUPER_ADMIN'
-      })
-    } catch (e) {
-      console.warn(`[淘宝授权] 回调处理失败：${e instanceof Error ? e.message.slice(0, 200) : '未知错误'}`)
-      result = { ok: false, reason: 'server_error' }
-    }
-    res.setHeader('Cache-Control', 'no-store')
-    res.setHeader('Referrer-Policy', 'no-referrer')
-    res.redirect(302, result.ok ? '/affiliates?taobao_oauth=ok' : `/affiliates?taobao_oauth=fail&reason=${encodeURIComponent(result.reason)}`)
   }
   @Get('callbacks/wecom') async verify(@Req() req: AuthRequest, @Res() res: Response) {
     const q = rawQuery(req.originalUrl)
@@ -392,30 +367,25 @@ class AdminController {
   @Get('integrations/taobao/adzones') async taobaoAdzones() {
     return { data: await adzoneBindings(await readConfig('taobao')) }
   }
-  @Get('integrations/taobao/oauth') async taobaoOAuthStatus() {
-    return { data: await taobaoAuthStatus(dbOAuthStore(), await readConfig('taobao')) }
-  }
   @Get('integrations/taobao/web') async taobaoWebStatus() { return { data: await webStatus() } }
-  @Post('integrations/taobao/web/login') async taobaoWebLogin() { return { data: await startWebLogin() } }
+  @Post('integrations/taobao/web/login') async taobaoWebLogin() { return { data: await startBrowserLogin() } }
+  @Get('integrations/taobao/web/login') async taobaoWebLoginStatus(@Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store')
+    const screenshot = await browserLoginScreenshot()
+    return { data: { ...browserLoginStatus(), screenshot } }
+  }
+  @Post('integrations/taobao/web/login/click') async taobaoWebLoginClick(@Body() body: { x?: unknown; y?: unknown }) {
+    await browserLoginClick(body.x, body.y)
+    return { data: { ok: true } }
+  }
+  @Delete('integrations/taobao/web/login') async taobaoWebLoginCancel() { return { data: await cancelBrowserLogin() } }
   @Post('integrations/taobao/web/verify') async taobaoWebVerify() {
     await webProbe(true)
     return { data: await webStatus() }
   }
   @Delete('integrations/taobao/web') async taobaoWebDisconnect() {
+    await cancelBrowserLogin()
     await disconnectWeb()
-    return { data: { ok: true } }
-  }
-  @Post('integrations/taobao/oauth/start') async taobaoOAuthStart(@Req() req: AuthRequest) {
-    if (req.actor!.role !== 'SUPER_ADMIN') throw new ForbiddenException('仅超级管理员可发起授权')
-    const data = await startTaobaoAuthorize(dbOAuthStore(), await readConfig('taobao'), req.actor!.id)
-    await audit(req.actor!.id, '发起淘宝账号授权', 'taobao', req.traceId!)
-    return { data }
-  }
-  /** 解除本系统绑定：只删除本系统保存的授权凭证，不会撤销淘宝侧的授权记录 */
-  @Delete('integrations/taobao/oauth') async taobaoOAuthUnbind(@Req() req: AuthRequest) {
-    if (req.actor!.role !== 'SUPER_ADMIN') throw new ForbiddenException('仅超级管理员可解除绑定')
-    await dbOAuthStore().deleteToken()
-    await audit(req.actor!.id, '解除淘宝账号绑定（本系统）', 'taobao', req.traceId!)
     return { data: { ok: true } }
   }
   /** 测试订单查询：按当前订单数据源查询最近 20 分钟（更新时间）第一页，不入库 */

@@ -36,7 +36,7 @@ const meta: Record<
       { key: 'pid', hint: '完整 PID，如 mm_1_2_3，保存时自动提取推广位 ID', icon: Tag },
       { key: 'adzoneId', hint: '由 PID 自动提取', icon: Hash, readOnly: true },
     ],
-    steps: ['未开通万能转链时自动按分享标题搜索转链', '同名商品多家店铺在卖时不转链，避免串店', '订单数据源需明确选择（官方账号授权 / 官方推广者 / 喵有券），系统不会自动切换；账号授权不能代替接口权限', '每个用户独立推广位时订单按推广位精确关联；用默认推广位的订单按商品唯一匹配时自动关联并标注「按商品匹配」，多人转过同一商品时进入「未关联用户」人工关联'],
+    steps: ['未开通万能转链时自动按分享标题搜索转链', '同名商品多家店铺在卖时不转链，避免串店', '订单数据源需明确选择（官方推广者 / 喵有券），系统不会自动切换；网页登录备用通道单独配置', '每个用户独立推广位时订单按推广位精确关联；用默认推广位的订单按商品唯一匹配时自动关联并标注「按商品匹配」，多人转过同一商品时进入「未关联用户」人工关联'],
   },
 }
 
@@ -271,36 +271,9 @@ function ThirdPartyCard({ kind }: { kind: ThirdKind }) {
   )
 }
 
-const oauthReasons: Record<string, string> = {
-  invalid_state: '授权请求无效或已使用，请从后台重新发起授权',
-  expired_state: '授权请求已过期（10 分钟），请重新发起',
-  denied: '你在淘宝页面取消了授权',
-  config_changed: '发起授权后 AppKey 已变更，请重新授权',
-  admin_invalid: '发起授权的管理员已失效，请重新登录后授权',
-  missing_code: '淘宝未返回授权码',
-  exchange_failed: '用授权码换取凭证失败（可能应用类型或权限不支持），原有配置未改动',
-  server_error: '处理授权回调时出错，原有配置未改动',
-}
-/** 淘宝授权回调后跳回本页时附带的结果（只含结果代码，不含任何凭证） */
-function OAuthResult() {
-  const [result] = useState(() => {
-    const q = new URLSearchParams(window.location.search)
-    const r = q.get('taobao_oauth')
-    if (r) window.history.replaceState(null, '', window.location.pathname)
-    return r ? { ok: r === 'ok', reason: q.get('reason') || '' } : null
-  })
-  if (!result) return null
-  return result.ok ? (
-    <Alert tone="success">淘宝账号授权成功，可在淘宝联盟配置中测试订单查询</Alert>
-  ) : (
-    <Alert tone="error">淘宝账号授权未完成：{oauthReasons[result.reason] || '未知原因'}</Alert>
-  )
-}
-
 export function Affiliates() {
   return (
     <>
-      <OAuthResult />
       <div className="tile-grid">
       <AffiliateCard kind="jd" />
       <ThirdPartyCard kind="jd-ecapi" />

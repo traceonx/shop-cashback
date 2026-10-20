@@ -25,7 +25,7 @@ export function webResponse(status: number, text: string, location = ''): any {
   if (status === 429) throw new WebError('LIMITED', '淘宝网页请求限流，稍后重试')
   if (status === 401 || /^https:\/\/login\.(?:taobao|tmall|alimama)\.com(?:\/|$)/.test(location))
     throw new WebError('EXPIRED', '淘宝联盟网页登录已失效')
-  if (status === 403) throw new WebError('VERIFY', '淘宝联盟需要人工验证，请重新打开登录助手')
+  if (status === 403) throw new WebError('VERIFY', '淘宝联盟需要人工验证，请点击重新登录')
   if (status >= 500) throw new WebError('NETWORK', '淘宝联盟网页服务暂不可用')
   let r: any
   try { r = parseJdJson(text) } catch {

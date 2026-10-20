@@ -635,6 +635,19 @@
   border: 1px solid var(--c-border);
   border-radius: var(--radius);
 }
+.taobao-login-screen {
+  display: block;
+  padding: 0;
+  border: 0;
+  width: 100%;
+  background: transparent;
+  cursor: pointer;
+}
+.taobao-login-screen img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
 .oauth-head {
   display: flex;
   align-items: center;

@@ -1,5 +1,5 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { BadRequestException, UnauthorizedException } from '@nestjs/common'
+import { randomUUID } from 'node:crypto'
+import { BadRequestException } from '@nestjs/common'
 import { db } from '../../database'
 import { encrypt, decrypt } from '../../security'
 import { readConfig } from '../../integrations'
@@ -11,8 +11,9 @@ const LOCK = 73194729
 type State = {
   state: WebState; cookie?: string; generation?: string; lastValid?: number; expiredAt?: number;
   incident?: string; notified?: boolean; attempts?: number; retryAt?: number;
-  pairing?: string; pairExpires?: number; nextAt?: number; lease?: string; leaseUntil?: number;
+  nextAt?: number; lease?: string; leaseUntil?: number;
   lastProbe?: number; account?: string;
+  userAgent?: string; lastError?: string; connecting?: string;
 }
 // 所有实例共享数据库锁、请求间隔与租约；请求期间不占数据库事务。
 async function mutate<T>(fn: (s: State) => Promise<T> | T): Promise<T> {
@@ -26,29 +27,41 @@ async function mutate<T>(fn: (s: State) => Promise<T> | T): Promise<T> {
     return result
   }, { timeout: 20000 })
 }
-const hash = (s: string) => createHash('sha256').update(s).digest('hex')
 export async function webStatus() {
   return mutate(s => ({
     state: s.state, lastValid: s.lastValid ?? null, expiredAt: s.expiredAt ?? null,
-    account: s.account ?? null, notification: s.incident ? (s.notified ? 'SENT' : (s.attempts || 0) >= 3 ? 'FAILED' : 'PENDING') : null,
+    account: s.account ?? null, lastError: s.lastError || null,
+    notification: s.incident ? (s.notified ? 'SENT' : (s.attempts || 0) >= 3 ? 'FAILED' : 'PENDING') : null,
   }))
 }
-export async function startWebLogin() {
-  const token = randomBytes(32).toString('base64url')
-  await mutate(s => { s.pairing = hash(token); s.pairExpires = Date.now() + 10 * 60000 })
-  return { token, expiresAt: Date.now() + 10 * 60000 }
-}
-export async function importWebLogin(token: string, cookies: unknown) {
+/** 仅由服务端独立浏览器调用，不提供客户端导入 Cookie 的公开接口。验证通过后再替换旧会话。 */
+export async function connectWebLogin(cookies: unknown, userAgent: string, stillCurrent: () => boolean = () => true) {
   const cookie = validateCookies(cookies)
+  if (!userAgent || userAgent.length > 512 || /[\r\n]/.test(userAgent)) throw new BadRequestException('浏览器标识无效')
   const c = await readConfig('taobao')
   const account = /^mm_(\d+)_/.exec(c.pid || '')?.[1]
   if (!account) throw new BadRequestException('请先保存默认推广位 PID')
-  await mutate(s => {
-    if (!token || s.pairing !== hash(token) || (s.pairExpires || 0) < Date.now()) throw new UnauthorizedException('配对码已过期或已使用')
-    // 未验证的新会话不能直接宣称登录成功；单次配对码绑定当前配置账号。
-    Object.assign(s, { cookie, generation: randomUUID(), account, state: 'PENDING', pairing: undefined, pairExpires: undefined })
-  })
-  await webProbe(true)
+  const connecting = randomUUID()
+  await mutate(s => { s.connecting = connecting })
+  try {
+    const d = day(new Date())
+    await requestWeb('report.getTbkOrderDetails', orderParams(d, d), true, { cookie, userAgent })
+    const latest = await readConfig('taobao')
+    if (account !== /^mm_(\d+)_/.exec(latest.pid || '')?.[1]) throw new WebError('VERIFY', '登录期间 PID 账号已变更，请重新登录')
+    await mutate(s => {
+      if (s.connecting !== connecting || !stillCurrent()) throw new BadRequestException('登录已取消，请重新登录')
+      Object.assign(s, { cookie, userAgent, account, generation: randomUUID(), connecting: undefined, lastError: undefined })
+      applyWebResult(s, undefined, Date.now(), '')
+    })
+  } catch (e) {
+    await mutate(s => {
+      if (s.connecting === connecting) {
+        s.connecting = undefined
+        s.lastError = e instanceof WebError ? e.message : '新登录会话未通过验证，请重试'
+      }
+    })
+    throw e
+  }
   return webStatus()
 }
 export async function disconnectWeb() {
@@ -56,21 +69,22 @@ export async function disconnectWeb() {
 }
 export function webMode(c: PlatformConfig) { return c.webMode || 'off' }
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
-async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', params: Record<string, string>, verify = false) {
+async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', params: Record<string, string>, verify = false, candidate?: { cookie: string; userAgent: string }) {
   const c = await readConfig('taobao')
   if (webMode(c) === 'off' && !verify) throw new WebError('NONE', '淘宝网页备用通道未启用')
   const rpm = Math.min(20, Math.max(1, Number(c.webRpm) || 20))
-  const deadline = Date.now() + 35000
-  let ticket: { cookie: string; lease: string; generation: string } | null = null
+  const deadline = Date.now() + Math.max(35000, Math.ceil(60000 / rpm) + 5000)
+  let ticket: { cookie: string; lease: string; generation: string; userAgent: string } | null = null
   while (!ticket && Date.now() < deadline) {
     ticket = await mutate(s => {
-      if (!s.cookie || !s.generation || (!verify && ['NONE', 'PENDING', 'EXPIRED', 'VERIFY'].includes(s.state)))
+      if (!candidate && (!s.cookie || !s.generation || (!verify && ['NONE', 'PENDING', 'EXPIRED', 'VERIFY'].includes(s.state))))
         throw new WebError(s.state, '淘宝网页会话不可用，请在联盟配置重新登录')
-      if (s.account !== /^mm_(\d+)_/.exec(c.pid || '')?.[1]) throw new WebError('VERIFY', '默认 PID 账号已变更，请重新登录')
+      if (!candidate && s.account !== /^mm_(\d+)_/.exec(c.pid || '')?.[1]) throw new WebError('VERIFY', '默认 PID 账号已变更，请重新登录')
       const now = Date.now()
       if ((s.nextAt || 0) > now || (s.leaseUntil || 0) > now) return null
       s.lease = randomUUID(); s.leaseUntil = now + 30000; s.nextAt = now + Math.ceil(60000 / rpm)
-      return { cookie: s.cookie, lease: s.lease, generation: s.generation }
+      return { cookie: candidate?.cookie || s.cookie!, lease: s.lease, generation: s.generation || '',
+        userAgent: candidate?.userAgent || s.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' }
     })
     if (!ticket) await wait(300)
   }
@@ -84,7 +98,7 @@ async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', pa
       headers: { Cookie: ticket.cookie, Accept: 'application/json', 'bx-v': '2.5.11',
         'X-Requested-With': 'XMLHttpRequest',
         Referer: endpoint === 'xt.entry' ? 'https://pub.alimama.com/portal/v2/tool/links/page/home/index.htm' : 'https://pub.alimama.com/portal/v2/effect/order/overviewOrder/page/index.htm',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' },
+        'User-Agent': ticket.userAgent },
       redirect: 'manual', signal: AbortSignal.timeout(20000),
     })
     const d = webResponse(r.status, await r.text(), r.headers.get('location') || '')
@@ -100,9 +114,11 @@ async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', pa
     throw error
   } finally {
     await mutate(s => {
-      if (s.generation !== ticket!.generation || s.lease !== ticket!.lease) return
+      if (s.lease !== ticket!.lease) return
       s.leaseUntil = 0; s.lease = undefined; s.lastProbe = Date.now()
+      if (candidate || s.generation !== ticket!.generation) return
       applyWebResult(s, error?.kind, Date.now(), randomUUID())
+      s.lastError = error?.message
     })
   }
 }
@@ -113,7 +129,7 @@ const orderParams = (from: string, until: string, page = 1, position = '') => ({
 })
 export async function webProbe(force = false) {
   const d = day(new Date())
-  await requestWeb('report.getTbkOrderDetails', { ...orderParams(d, d), pageSize: '1' }, force)
+  await requestWeb('report.getTbkOrderDetails', orderParams(d, d), force)
 }
 export async function convertWeb(c: PlatformConfig, content: string) {
   if (!/^mm_\d+_\d+_\d+$/.test(c.pid || '') || c.pid.split('_')[3] !== c.adzoneId)

@@ -8,3 +8,5 @@ node_modules
 *.dump
 .git
 artifacts
+data
+**/taobao-web-browser

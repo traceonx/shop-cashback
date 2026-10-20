@@ -2,9 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { db } from './database'
 import { encrypt, decrypt } from './security'
-import { convertWeb, disconnectWeb, importWebLogin, queryWebOrders, startWebLogin, webMaintenance, webProbe, webStatus, withWebFallback } from './platforms/taobao/web'
+import { convertWeb, disconnectWeb, connectWebLogin, queryWebOrders, webMaintenance, webProbe, webStatus, withWebFallback } from './platforms/taobao/web'
 
-test('网页会话完整流程：一次性配对、PID、共享节流、翻页、失效通知与恢复（全模拟）', async t => {
+test('网页会话完整流程：验证后替换、PID、共享节流、翻页、失效通知与恢复（全模拟）', async t => {
   const config = { pid: 'mm_123_456_7890', adzoneId: '7890', webMode: 'auto', webRpm: '20', webLookbackDays: '2' }
   let stored: any = null
   let queue = Promise.resolve()
@@ -40,13 +40,17 @@ test('网页会话完整流程：一次性配对、PID、共享节流、翻页�
     stored.value.encrypted = encrypt(s, 'taobao-web-session')
   }
   const cookies = [{ name: '_tb_token_', value: 'fake-session-token', domain: '.alimama.com', path: '/' }]
-  const pair = await startWebLogin()
-  assert.ok(!JSON.stringify(stored).includes(pair.token))
-  await importWebLogin(pair.token, cookies)
+  await connectWebLogin(cookies, 'test-browser-agent')
   assert.equal((await webStatus()).state, 'ACTIVE')
   assert.ok(!JSON.stringify(await webStatus()).includes('fake-session-token'))
   assert.ok(!JSON.stringify(stored).includes('fake-session-token'))
-  await assert.rejects(importWebLogin(pair.token, cookies), /配对码/)
+  // 新登录失败不能破坏原来可用的会话，也不能误发失效提醒。
+  response = { success: false, bizErrorCode: 'NOT_LOGIN' }
+  unlock()
+  await assert.rejects(connectWebLogin([{ ...cookies[0], value: 'bad-new-cookie' }], 'test-browser-agent'), /失效/)
+  assert.equal((await webStatus()).state, 'ACTIVE')
+  assert.equal((decrypt(stored.value.encrypted, 'taobao-web-session') as any).cookie, '_tb_token_=fake-session-token')
+  assert.equal((await webStatus()).notification, null)
 
   response = { success: true, data: { itemName: '测试', shortLinkurl: 'https://s.click.taobao.com/test', calTkRate: 270 } }
   unlock()
@@ -86,8 +90,7 @@ test('网页会话完整流程：一次性配对、PID、共享节流、翻页�
 
   response = { success: true, data: { result: [], hasNext: false, pageNo: 1 } }
   unlock()
-  const again = await startWebLogin()
-  await importWebLogin(again.token, cookies)
+  await connectWebLogin(cookies, 'test-browser-agent')
   response = { success: false, bizErrorCode: 'NOT_LOGIN' }
   unlock()
   await assert.rejects(webProbe(), /失效/)

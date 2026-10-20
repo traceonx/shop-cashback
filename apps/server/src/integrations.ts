@@ -5,7 +5,7 @@ import { db, audit, dateText } from './database'
 import { decrypt, encrypt } from './security'
 import { ECAPI_KIND, ecapiConfigured, ecapiFields, ecapiTest } from './platforms/jd/ecapi'
 import { TB_ECAPI_KIND, tbEcapiConfigured, tbEcapiFields, tbEcapiTest } from './platforms/taobao/ecapi'
-import { normalizePublicUrl } from './platforms/taobao/oauth'
+import { normalizePublicUrl } from './platforms/taobao/public-url'
 import { orderSourceOf } from './platforms/taobao/orders'
 import { parsePositionPool } from './platforms/jd/positions'
 import { TAOBAO_ACCOUNT, isAdzoneCode, parseAdzonePool } from './platforms/taobao/adzones'
@@ -46,7 +46,9 @@ export async function readConfig(kind: Provider): Promise<Config> {
   }
   if (kind !== 'wecom') {
     const c = await db.affiliateConfig.findUnique({ where: { accountId: `${kind}-primary` } })
-    return c ? decrypt(c.encryptedConfig, `${kind}-primary`) : {}
+    const value: Config = c ? decrypt(c.encryptedConfig, `${kind}-primary`) : {}
+    if (kind === 'taobao' && value.orderSource === 'official-sc') value.orderSource = 'official'
+    return value
   }
   const c = await db.channelConfig.findUnique({ where: { channelId: 'wecom-primary' } })
   return c ? decrypt(c.encryptedConfig, 'wecom-primary') : {}
@@ -116,7 +118,8 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
       if (next[key] && (!Number.isInteger(Number(next[key])) || Number(next[key]) < min || Number(next[key]) > max))
         throw new BadRequestException(`${key} 应为 ${min}～${max} 的整数`)
     }
-    if (next.orderSource && !['official-sc', 'official', 'ecapi'].includes(next.orderSource)) throw new BadRequestException('订单数据源无效')
+    if (next.orderSource === 'official-sc') next.orderSource = 'official'
+    if (next.orderSource && !['official', 'ecapi'].includes(next.orderSource)) throw new BadRequestException('订单数据源无效')
     if (next.autoMatch && !['true', 'false'].includes(next.autoMatch)) throw new BadRequestException('自动关联开关无效')
     if (next.perUserAdzone && !['true', 'false'].includes(next.perUserAdzone)) throw new BadRequestException('独立推广位开关无效')
     next.publicUrl = normalizePublicUrl(next.publicUrl) || ''

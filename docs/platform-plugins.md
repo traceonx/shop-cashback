@@ -58,36 +58,26 @@
 
 ### 数据源（明确选择，不隐式切换）
 
-后台「渠道配置 → 淘宝联盟」的「订单数据源」三选一；与转链数据源（「淘宝联盟 · 喵有券」开关）分开配置：
+后台「渠道配置 → 淘宝联盟」的「订单数据源」二选一；与转链数据源（「淘宝联盟 · 喵有券」开关）分开配置：
 
 | 数据源 | 接口 | 前提 |
 |---|---|---|
-| 官方账号授权 | [taobao.tbk.sc.order.details.get](https://developer.alibaba.com/docs/api.htm?apiId=43755) | 应用具备该接口权限 + 淘宝账号授权（session） |
 | 官方推广者 | taobao.tbk.order.details.get | 应用具备该接口权限 |
 | 喵有券 | [tbkOrderDetailsGet](https://www.ecapi.cn/index/index/openapi/id/83.shtml?ptype=1) | 「淘宝联盟 · 喵有券」的 apkey 与授权淘宝用户名（付费会员接口） |
 
-- 查询的是联盟推广订单，不是个人购物订单。三者返回同一套字段，由 `orders.ts` 统一转换；订单唯一键为 平台 + 推广账号（`taobao-primary`）+ `trade_parent_id` + `trade_id`，与数据源无关，切换数据源不会重复入库或重复返利。
+- 查询的是联盟推广订单，不是个人购物订单。两者返回同一套字段，由 `orders.ts` 统一转换；订单唯一键为 平台 + 推广账号（`taobao-primary`）+ `trade_parent_id` + `trade_id`，与数据源无关，切换数据源不会重复入库或重复返利。
 - 旧配置没有保存数据源时按一次性规则推断（配置了喵有券授权账号为喵有券，否则为官方推广者），运行中不再「官方失败后改用喵有券」。
 
-### 官方账号授权（OAuth）
+### 网页登录备用通道
 
-依据淘宝开放平台[用户授权介绍](https://developer.alibaba.com/docs/doc.htm?treeId=49&articleId=102635&docType=1)、[taobao.top.auth.token.create](https://developer.alibaba.com/docs/api.htm?apiId=25388)、[taobao.top.auth.token.refresh](https://jaq-doc.alibaba.com/docs/api.htm?scopeId=381&apiId=25387)。代码：`apps/server/src/platforms/taobao/oauth.ts`。
-
-1. 超管点「授权淘宝账号」→ `POST /integrations/taobao/oauth/start` 生成 24 字节随机 state（库里只存 SHA-256，10 分钟有效、一次性，绑定发起的管理员与当前 AppKey），返回 `https://oauth.taobao.com/authorize?response_type=code&client_id=AppKey&redirect_uri=回调&state=&view=web`。
-2. 用户在淘宝官方页面登录并同意，淘宝跳回 `外部访问地址/api/v1/callbacks/taobao/oauth?code=&state=`。
-3. 回调原子取出并删除 state，校验未过期、AppKey 未变更、管理员仍为启用的超管，再用 `taobao.top.auth.token.create`（code 30 分钟内一次性）换取 session；解析 `token_result` 的 access_token、refresh_token、expire_time、refresh_token_valid_time、user_id、user_nick。只有成功才写入，失败不覆盖已有凭证。
-4. 凭证用 CONFIG_ENCRYPTION_KEY（AES-256-GCM）加密保存在系统配置 `oauth:taobao`；接口只返回昵称、状态和到期时间，不返回 session / refresh_token；日志与跳转地址不含 code 或凭证。回调只跳回固定的 `/affiliates?taobao_oauth=ok|fail&reason=代码`。
-5. 续期：只有服务市场订购类应用支持 `taobao.top.auth.token.refresh`；session 到期前 30 分钟尝试刷新并保存新的 refresh_token；不支持或失败时保留原凭证，到期后提示重新授权。接口返回 26 / 27 等 session 错误时标记「授权已失效」（不删除凭证），重新授权后覆盖。
-6. 「解除本系统绑定」只删除本系统保存的凭证，不调用也不声称撤销淘宝侧授权。
-
-回调地址配置：在淘宝开放平台「控制台 → 应用管理 → 应用设置 → 基础信息 → 回调地址」填写与「外部访问地址」同域的地址（官方要求 redirect_uri 与回调地址同域或同一顶级域）。NAS 部署时外部访问地址填浏览器能打开后台的公网域名（经反向代理 / 内网穿透均可，淘宝只做浏览器跳转，不直接访问服务器）；也可用环境变量 `PUBLIC_BASE_URL` 提供默认值。
+旧 OAuth 授权入口与 SC 订单调用已移除。点击「登录淘宝联盟」打开官方页面，扫码后自动连接；无需配对码或命令行助手。详见 [网页登录使用说明](taobao-web-backup.md)。
 
 ### 同步
 
 - 历史回补按创建时间（`query_type=1`），最近一小时增量按更新时间（`query_type=4`）；每段 20 分钟（官方日常 3 小时、大促 20 分钟），起点向前重叠 1 分钟，重复数据幂等更新。
 - 第 2 页起必须回传上一页的 `position_index`：位点写在同步任务游标里，与该页订单在同一事务提交，进程重启后从游标继续；位点丢失直接报错，不跳页。
 - 响应缺少 `data`、列表结构异常、提示有下一页却无位点时报错，不当作零订单推进进度。
-- 错误分类：授权失效（26/27/session）标记失效且不重试；无接口权限（11/12/-4002）提示申请权限；限流（7/9100）、超时、服务不可用（3001、isp.*）退避重试 2 次（1s、3s），仍失败则任务失败并保留已导入数据。
+- 错误分类：接口身份错误（26/27/session）不重试；无接口权限（11/12/-4002）提示申请权限；限流（7/9100）、超时、服务不可用（3001、isp.*）退避重试 2 次（1s、3s），仍失败则任务失败并保留已导入数据。
 - 映射：状态 12 已付款、13 已失效、14 确认收货、3 已结算；佣金 13 记 0、3 取 `pub_share_fee`、其余取 `pub_share_pre_fee`；「付款金额」按计佣金额口径：未结算取 `alipay_total_price`、结算后取 `pay_price`（与 `total_commission_fee` 的计算口径一致）；下单时间 `tk_create_time`，佣金结算时间 `tk_earning_time`。接口没有确认收货时间字段，「完成时间」显示「未获取」，不与结算时间混用。
 - 用户专属推广位（`perUserAdzone`，默认开启，`platforms/taobao/adzones.ts`）：用户首次转淘宝链接时固定绑定一个推广位，推广位 ID 保存为该用户的淘宝标识（`user_tracking_codes`，旧版随机标识会被替换），之后都用该推广位的 PID 转链；订单的 `adzone_id` 作为 trackingCode，按联盟标识精确关联用户（TRACKING）。绑定后不回收，旧链接多久以后下单都能对上。推广位来源依次为：
   1. 推广位池（`adzonePool`）：管理员在淘宝联盟后台建好推广位后填入，每行一个 PID，必须与默认 PID 同一联盟账号（网站可不同），不能包含默认推广位；取第一个未绑定的。已绑定用户的推广位不能从池里移除。后台显示每个推广位绑定的用户（`GET /api/v1/integrations/taobao/adzones`）。

@@ -1,8 +1,7 @@
-// 淘宝联盟推广订单。三种数据源由后台「订单数据源」明确选择，不做隐式切换：
-//   official-sc  官方账号授权：taobao.tbk.sc.order.details.get（需授权 session，https://developer.alibaba.com/docs/api.htm?apiId=43755）
+// 淘宝联盟推广订单。两种数据源由后台「订单数据源」明确选择，不做隐式切换：
 //   official     官方推广者：taobao.tbk.order.details.get（应用自身推广者账号）
 //   ecapi        喵有券：taoke/tbkOrderDetailsGet（字段与官方一致）
-// 三者返回同一套订单字段，统一按 trade_parent_id / trade_id 入库；唯一性与数据源无关，切换数据源不会重复入库。
+// 两者返回同一套订单字段，统一按 trade_parent_id / trade_id 入库；唯一性与数据源无关，切换数据源不会重复入库。
 import { BadRequestException } from '@nestjs/common'
 import { dateText } from '../../database'
 import { decimalCents } from '../jd'
@@ -91,9 +90,8 @@ export function normalizeTaobaoOrder(raw: any): PlatformOrder {
   }
 }
 
-export type TaobaoOrderSource = 'official-sc' | 'official' | 'ecapi'
+export type TaobaoOrderSource = 'official' | 'ecapi'
 export const ORDER_SOURCES: Record<TaobaoOrderSource, string> = {
-  'official-sc': '官方账号授权（taobao.tbk.sc.order.details.get）',
   official: '官方推广者（taobao.tbk.order.details.get）',
   ecapi: '喵有券（tbkOrderDetailsGet）',
 }
@@ -102,6 +100,7 @@ export const ORDER_SOURCES: Record<TaobaoOrderSource, string> = {
  * 之后不再在运行中隐式切换。
  */
 export function orderSourceOf(c: PlatformConfig, ecapiConfigured: boolean): TaobaoOrderSource {
+  if (c.orderSource === 'official-sc') return 'official'
   if (c.orderSource && c.orderSource in ORDER_SOURCES) return c.orderSource as TaobaoOrderSource
   return ecapiConfigured ? 'ecapi' : 'official'
 }
@@ -147,10 +146,6 @@ export function readOrderPage(data: any, listOf: (d: any) => unknown): Page {
 }
 
 export type OrderDeps = {
-  /** 取官方授权 session（仅 official-sc） */
-  session?: () => Promise<string>
-  /** 授权失效时回写状态 */
-  onAuthInvalid?: (reason: string) => Promise<void>
   /** 喵有券配置 */
   ecapi?: () => Promise<{ apiKey: string; tbname: string } | null>
   sleep?: (ms: number) => Promise<void>
@@ -163,7 +158,7 @@ export async function queryTaobaoOrders(
   request: { from: Date; until: Date; page: number; type: 1 | 3; position?: string | null },
   deps: OrderDeps = {},
 ): Promise<{ rows: PlatformOrder[]; hasMore: boolean; position: string | null }> {
-  const source = (c.orderSource as TaobaoOrderSource) || 'official'
+  const source = orderSourceOf(c, false)
   if (request.page > 1 && !request.position) throw new TaobaoOrderError('PARAM', '翻页位点丢失，已停止；请重新同步该时间段')
   const params = {
     query_type: String(request.type === 3 ? 4 : 1), // 1 按创建时间（历史回补）；4 按更新时间（增量）
@@ -184,9 +179,8 @@ export async function queryTaobaoOrders(
       const d = await ecapiCall('taoke/tbkOrderDetailsGet', { apkey: t.apiKey, tbname: t.tbname, ...params })
       return readOrderPage(d, (x) => x.list)
     }
-    const method = source === 'official-sc' ? 'taobao.tbk.sc.order.details.get' : 'taobao.tbk.order.details.get'
-    const session = source === 'official-sc' ? await (deps.session ?? (() => Promise.reject(new TaobaoOrderError('AUTH', '尚未授权淘宝账号'))))() : undefined
-    const r = await topRequest(c, method, params, session ? { session } : {})
+    const method = 'taobao.tbk.order.details.get'
+    const r = await topRequest(c, method, params)
     return readOrderPage(r?.data, (x) => (x.results == null ? null : list(x.results, 'publisher_order_dto')))
   }
   for (let attempt = 0; ; attempt++) {
@@ -194,8 +188,7 @@ export async function queryTaobaoOrders(
       const page = await once()
       return { rows: page.list.map(normalizeTaobaoOrder), hasMore: page.hasNext, position: page.hasNext ? page.position : null }
     } catch (e) {
-      const err = classifyTopError(e, source === 'official-sc' ? 'taobao.tbk.sc.order.details.get' : 'taobao.tbk.order.details.get')
-      if (err.kind === 'AUTH' && source === 'official-sc') await deps.onAuthInvalid?.(err.message).catch(() => undefined)
+      const err = classifyTopError(e, 'taobao.tbk.order.details.get')
       if (!retryable(err) || attempt >= RETRY_DELAYS.length) throw err
       await sleep(RETRY_DELAYS[attempt])
     }

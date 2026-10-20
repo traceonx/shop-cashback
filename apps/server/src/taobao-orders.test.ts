@@ -75,46 +75,6 @@ const req = { from: new Date('2026-10-19T06:00:00Z'), until: new Date('2026-10-1
 const okBody = (method: string) =>
   JSON.stringify({ [`${method.replace(/^taobao\./, '').replaceAll('.', '_')}_response`]: { data: { has_next: false, results: { publisher_order_dto: [order] } } } })
 
-test('官方账号授权：sc 接口携带 session，按创建时间回补', async () => {
-  const original = globalThis.fetch
-  try {
-    let seen: URLSearchParams | null = null
-    globalThis.fetch = async (_u, init) => {
-      seen = init!.body as URLSearchParams
-      return new Response(okBody('taobao.tbk.sc.order.details.get'))
-    }
-    const r = await queryTaobaoOrders({ ...c, orderSource: 'official-sc' }, req, { session: async () => 'sess-123' })
-    assert.equal(r.rows.length, 1)
-    assert.equal(seen!.get('method'), 'taobao.tbk.sc.order.details.get')
-    assert.equal(seen!.get('session'), 'sess-123')
-    assert.equal(seen!.get('query_type'), '1')
-  } finally {
-    globalThis.fetch = original
-  }
-})
-
-test('授权失效：标记失效且不重试；无权限：给出接口权限提示', async () => {
-  const original = globalThis.fetch
-  try {
-    let calls = 0
-    const invalid: string[] = []
-    globalThis.fetch = async () => {
-      calls++
-      return new Response(JSON.stringify({ error_response: { code: 27, msg: 'Invalid session', sub_code: 'invalid-sessionkey' } }))
-    }
-    await assert.rejects(
-      queryTaobaoOrders({ ...c, orderSource: 'official-sc' }, req, { session: async () => 's', onAuthInvalid: async (m) => void invalid.push(m) }),
-      (e: unknown) => e instanceof TaobaoOrderError && e.kind === 'AUTH',
-    )
-    assert.equal(calls, 1)
-    assert.equal(invalid.length, 1)
-    globalThis.fetch = async () => new Response(JSON.stringify({ error_response: { code: 11, msg: 'Insufficient isv permissions', sub_code: 'isv.permission-api-package-limit' } }))
-    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'official-sc' }, req, { session: async () => 's' }), /接口权限/)
-  } finally {
-    globalThis.fetch = original
-  }
-})
-
 test('限流与超时有上限地退避重试；响应格式异常不当作零订单', async () => {
   const original = globalThis.fetch
   const waits: number[] = []
@@ -151,7 +111,7 @@ test('限流与超时有上限地退避重试；响应格式异常不当作零�
 })
 
 test('数据源选择：明确选择优先；旧配置按一次性推断；切换数据源订单唯一键不变', async () => {
-  assert.equal(orderSourceOf({ orderSource: 'official-sc' }, true), 'official-sc')
+  assert.equal(orderSourceOf({ orderSource: 'official-sc' }, true), 'official')
   assert.equal(orderSourceOf({}, true), 'ecapi')
   assert.equal(orderSourceOf({}, false), 'official')
   assert.equal(orderSourceOf({ orderSource: 'bogus' }, false), 'official')

@@ -7,7 +7,6 @@ import type { PlatformConfig, PlatformPlugin } from '../types'
 import { dateText } from '../../database'
 import { taobaoFields } from './config'
 import { queryTaobaoOrders, taobaoOrderAmounts, taobaoOrderImage, taobaoOrderSettlement, taobaoOrderStatus, orderSourceOf, type OrderDeps } from './orders'
-import { dbOAuthStore, markInvalid, usableSession } from './oauth'
 
 const GATEWAY = 'https://eco.taobao.com/router/rest'
 const HOSTS = ['taobao.com', 'tmall.com', 'tmall.hk', 'tb.cn', 'yao.95095.com', 'liangxinyao.com']
@@ -243,12 +242,9 @@ export function parseConvert(resp: any) {
 }
 
 
-/** 生产环境的订单依赖：授权 session（加密存储、按需刷新）与喵有券配置 */
+/** 生产环境的订单依赖：喵有券配置 */
 export function orderDeps(c: PlatformConfig): OrderDeps {
-  const store = dbOAuthStore()
   return {
-    session: () => usableSession(store, c, (official, method, biz) => topRequest(official, method, biz)),
-    onAuthInvalid: (reason) => markInvalid(store, reason),
     ecapi: async () => {
       const { readConfig } = await import('../../integrations')
       const { TB_ECAPI_KIND, tbEcapiConfigured } = await import('./ecapi')
@@ -393,7 +389,7 @@ export const taobaoPlugin: PlatformPlugin = {
     const now = new Date()
     const orders = await probe('taobao.tbk.order.details.get', { query_type: '4', start_time: dateText(new Date(now.getTime() - 3600000)), end_time: dateText(now), page_size: '1' })
     const route = convert === '可用' ? '转链方式：万能转链' : search === '可用' ? '转链方式：物料搜索（万能转链为邀约权限，未开通不影响使用）' : '无可用转链权限，需申请「物料搜索」或「万能转链」'
-    return `签名与 AppKey 验证通过。商品详情：${detail}；物料搜索：${search}；万能转链：${convert}；淘口令：${tpwd}；长链转短链：${spread}；推广者订单查询（taobao.tbk.order.details.get）：${orders === '可用' ? '可用' : '未开通（订单数据源可改选「官方账号授权」或「喵有券」）'}。${route}`
+    return `签名与 AppKey 验证通过。商品详情：${detail}；物料搜索：${search}；万能转链：${convert}；淘口令：${tpwd}；长链转短链：${spread}；推广者订单查询（taobao.tbk.order.details.get）：${orders === '可用' ? '可用' : '未开通（订单数据源可改选「喵有券」或启用网页登录备用通道）'}。${route}`
   },
   async queryOrders(c, request) {
     const { withWebFallback, queryWebOrders } = await import('./web')
