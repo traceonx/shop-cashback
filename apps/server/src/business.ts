@@ -236,6 +236,8 @@ export async function listOrders(platformId?: string) {
     return {
       id: o.id,
       externalOrderId: o.externalOrderId,
+      // 订单的推广位 ID（淘宝 adzone_id，京东 positionId），取自联盟原始订单数据
+      positionId: positionIdOf(o.platform, o.rawData),
       product: o.items[0]?.title || '商品信息待确认',
       sku: o.items[0]?.sku || '',
       platform: ({ jd: '京东', taobao: '淘宝', pdd: '拼多多' } as Record<string, string>)[o.platform] || o.platform,
@@ -257,6 +259,12 @@ export async function listOrders(platformId?: string) {
       ...settlementOf(o.platform, o.rawData, currentStatus),
     }
   })
+}
+/** 订单原始数据里的推广位 ID；未返回时为 null */
+function positionIdOf(platformId: string, raw: unknown) {
+  const r = (raw || {}) as Record<string, unknown>
+  const v = platformId === 'taobao' ? r.adzone_id : platformId === 'jd' ? r.positionId : null
+  return v != null && /^[1-9]\d{0,19}$/.test(String(v)) ? String(v) : null
 }
 /** 佣金结算状态与结算时间；平台未提供时按订单状态推断（已取消为已失效） */
 function settlementOf(platformId: string, raw: unknown, status: string) {

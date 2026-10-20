@@ -36,6 +36,7 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
       ['settlement', '结算'],
       ['settledAt', '佣金结算时间'],
       ['externalOrderId', '订单号', true],
+      ['positionId', '推广位 ID', true],
     ],
   },
   users: {
@@ -77,7 +78,7 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
   },
 }
 const moneyKeys = ['price', 'rebate', 'amount', 'paidAmount', 'commission', 'balance', 'before', 'after']
-const monoKeys = ['id', 'externalOrderId', 'taobaoPid', 'jdPosition']
+const monoKeys = ['id', 'externalOrderId', 'taobaoPid', 'jdPosition', 'positionId']
 const PAGE_SIZE = 10
 
 /** 单元格渲染（列表与详情共用） */
