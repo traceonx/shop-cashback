@@ -190,10 +190,8 @@ export async function convert(content: string, actor: string, trace: string, use
     const basisPoints = rule?.basisPoints ?? Math.round((await settings()).ratio * 100)
     snapshot.rebate =
       snapshot.commission === null ? null : Number((BigInt(snapshot.commission) * BigInt(basisPoints)) / 10000n)
-    snapshot.finalPrice =
-      snapshot.payablePrice != null && snapshot.rebate !== null
-        ? Math.max(0, snapshot.payablePrice - snapshot.rebate)
-        : null
+    // 预计到手价 = 券后实付价，不再减去返现（返现单独展示）
+    snapshot.finalPrice = snapshot.payablePrice != null ? Math.max(0, snapshot.payablePrice) : null
     await db.promotionRecord.update({
       where: { id: record.id },
       data: { status: 'SUCCESS', promotionUrl: link, productSnapshot: json(snapshot) },

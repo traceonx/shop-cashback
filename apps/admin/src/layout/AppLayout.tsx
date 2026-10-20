@@ -17,6 +17,7 @@ import {
   Settings,
   ShoppingCart,
   Sun,
+  Tag,
   UserRound,
   Users,
   Wallet,
@@ -57,6 +58,7 @@ export const navigation: { title?: string; items: NavItem[] }[] = [
     items: [
       { path: '/channels', label: '通知配置', icon: Bot },
       { path: '/affiliates', label: '渠道配置', icon: Building2 },
+      { path: '/adzones', label: '推广位管理', icon: Tag },
       { path: '/settings', label: '系统设置', icon: Settings },
     ],
   },

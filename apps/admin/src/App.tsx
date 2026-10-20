@@ -10,6 +10,7 @@ import { Dashboard } from './pages/Dashboard'
 import { Records } from './pages/Records'
 import { Channels } from './pages/Channels'
 import { Affiliates } from './pages/Affiliates'
+import { Adzones } from './pages/Adzones'
 import { Settings } from './pages/Settings'
 import { Profile } from './pages/Profile'
 import { LogViewer } from './pages/LogViewer'
@@ -48,6 +49,7 @@ export function App() {
           ))}
           <Route path="/channels" element={<Channels />} />
           <Route path="/affiliates" element={<Affiliates />} />
+          <Route path="/adzones" element={<Adzones />} />
           <Route path="/settings" element={<Settings notify={notify} />} />
           <Route path="/profile" element={<Profile notify={notify} />} />
           <Route path="*" element={<Navigate to="/" replace />} />

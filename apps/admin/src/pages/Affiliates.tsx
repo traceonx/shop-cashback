@@ -4,7 +4,6 @@ import { Alert, Button, Loading, Modal, Switch, TextField } from '../ui'
 import { dateTime } from '../lib/format'
 import { ProviderTile, useIntegration, type IntegrationKind } from './integration'
 import { TaobaoOrderPanel } from './TaobaoOrderPanel'
-import { JdPositionPanel } from './JdPositionPanel'
 
 type Affiliate = Exclude<IntegrationKind, 'wecom' | 'jd-ecapi' | 'taobao-ecapi'>
 const meta: Record<
@@ -23,7 +22,7 @@ const meta: Record<
       { key: 'positionId', hint: '推广位 ID', icon: Tag },
       { key: 'siteId', hint: '网站 / APP 媒体 ID，仅转链使用', icon: Store },
     ],
-    steps: ['只需应用凭证，不收集京东登录密码', '订单查询只需 AppKey 与 AppSecret', '订单归属未核实前不会自动入账返现', '填写推广位池后每个用户固定使用一个推广位，订单按推广位精确关联用户'],
+    steps: ['只需应用凭证，不收集京东登录密码', '订单查询只需 AppKey 与 AppSecret', '订单归属未核实前不会自动入账返现', '用户独立推广位（推广位池）在「推广位管理」中配置，订单按推广位精确关联用户'],
   },
   taobao: {
     name: '淘宝联盟',
@@ -115,7 +114,6 @@ function AffiliateCard({ kind }: { kind: Affiliate }) {
                   )
                 })}
               </div>
-              {kind === 'jd' && <JdPositionPanel it={it} />}
               {kind === 'taobao' && <TaobaoOrderPanel it={it} />}
               {it.error && <Alert tone="error">{it.error}</Alert>}
               {it.notice && <Alert tone="success">{it.notice}</Alert>}
