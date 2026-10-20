@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Save, ShoppingBag, Tag } from 'lucide-react'
 import { api } from '../lib/api'
 import { dateTime } from '../lib/format'
-import { Alert, Button, Card, CardBody, CardHeader, Loading, Switch, TextArea } from '../ui'
+import { Alert, Button, Card, CardBody, CardHeader, Loading, Switch, Tabs, TextArea } from '../ui'
 import { useIntegration } from './integration'
 import { JdPositionPanel } from './JdPositionPanel'
 
-type Binding = { adzone: string; pid: string | null; source: 'POOL' | 'CREATED'; user: { id: string; name: string } | null; boundAt: string | null }
+type Binding = {
+  adzone: string
+  pid: string | null
+  source: 'POOL' | 'CREATED'
+  user: { id: string; name: string } | null
+  boundAt: string | null
+}
 type Adzones = { pool: Binding[]; created: Binding[]; free: number }
 
 /** 淘宝：每个用户独立推广位开关、推广位池与绑定情况 */
@@ -23,7 +30,7 @@ function TaobaoAdzones() {
   return (
     <Card>
       <CardHeader
-        title="淘宝联盟"
+        title="淘宝推广位"
         subtitle="订单按推广位 ID（adzone_id）关联用户"
         icon={ShoppingBag}
         actions={
@@ -37,9 +44,14 @@ function TaobaoAdzones() {
           <Loading text="正在读取配置…" />
         ) : (
           <div className="stack">
-            <Switch label="每个用户独立推广位" checked={enabled} onChange={(v) => it.set('perUserAdzone', v ? 'true' : 'false')} />
+            <Switch
+              label="每个用户独立推广位"
+              checked={enabled}
+              onChange={(v) => it.set('perUserAdzone', v ? 'true' : 'false')}
+            />
             <small className="text-faint">
-              用户首次转淘宝链接时固定绑定一个推广位，之后都用它转链，订单的推广位 ID 精确对应用户（归属方式「联盟标识」）。先从推广位池取未绑定的；池子用完且开启喵有券淘宝接入时自动创建（喵有券付费接口）；都不行时使用默认推广位，订单按商品规则匹配。
+              用户首次转淘宝链接时固定绑定一个推广位，之后都用它转链，订单的推广位 ID
+              精确对应用户（归属方式「联盟标识」）。先从推广位池取未绑定的；池子用完且开启喵有券淘宝接入时自动创建（喵有券付费接口）；都不行时使用默认推广位，订单按商品规则匹配。
             </small>
             {enabled && (
               <TextArea
@@ -54,11 +66,13 @@ function TaobaoAdzones() {
             {adzones && adzones.pool.length + adzones.created.length > 0 && (
               <div className="oauth-box">
                 <div>
-                  推广位池 {adzones.pool.length} 个，空闲 {adzones.free} 个{adzones.created.length ? `；自动创建 ${adzones.created.length} 个` : ''}
+                  推广位池 {adzones.pool.length} 个，空闲 {adzones.free} 个
+                  {adzones.created.length ? `；自动创建 ${adzones.created.length} 个` : ''}
                 </div>
                 {[...adzones.pool, ...adzones.created].map((b) => (
                   <div key={b.adzone} className="text-faint">
-                    {b.pid || b.adzone} · {b.user ? `${b.user.name}（${b.boundAt ? dateTime(b.boundAt) : ''} 绑定）` : '空闲'}
+                    {b.pid || b.adzone} ·{' '}
+                    {b.user ? `${b.user.name}（${b.boundAt ? dateTime(b.boundAt) : ''} 绑定）` : '空闲'}
                     {b.source === 'CREATED' && ' · 自动创建'}
                   </div>
                 ))}
@@ -82,7 +96,7 @@ function JdPositions() {
   return (
     <Card>
       <CardHeader
-        title="京东联盟"
+        title="京东推广位"
         subtitle="订单按推广位 ID（positionId）关联用户"
         icon={Tag}
         actions={
@@ -106,12 +120,19 @@ function JdPositions() {
   )
 }
 
-/** 推广位管理：每个用户固定绑定一个推广位，订单按推广位精确关联用户 */
+/** 推广位管理：顶部标签切换京东 / 淘宝，每个用户固定绑定一个推广位，订单按推广位精确关联用户 */
+type Tab = 'jd' | 'taobao'
+const tabs: { value: Tab; label: string; icon: typeof Tag }[] = [
+  { value: 'jd', label: '京东联盟', icon: Tag },
+  { value: 'taobao', label: '淘宝联盟', icon: ShoppingBag },
+]
 export function Adzones() {
+  const [params, setParams] = useSearchParams()
+  const tab: Tab = params.get('tab') === 'taobao' ? 'taobao' : 'jd'
   return (
     <div className="stack">
-      <TaobaoAdzones />
-      <JdPositions />
+      <Tabs items={tabs} value={tab} onChange={(t) => setParams({ tab: t }, { replace: true })} />
+      {tab === 'jd' ? <JdPositions /> : <TaobaoAdzones />}
     </div>
   )
 }

@@ -90,7 +90,7 @@ function cell(kind: RecordKind, key: string, r: Row) {
     const [tone, text] = (({ SETTLED: ['success', '已结算'], INVALID: ['secondary', '已失效'] }) as Record<string, ['success' | 'secondary', string]>)[String(v)] || ['warning', '未结算']
     return <Chip tone={tone} dot>{text}</Chip>
   }
-  if (moneyKeys.includes(key)) return key === 'paidAmount' && v == null ? <span className="text-faint">接口未提供</span> : <span className="text-amount">{amount(v)}</span>
+  if (moneyKeys.includes(key)) return key === 'paidAmount' && v == null ? null : <span className="text-amount">{amount(v)}</span>
   if (key === 'product')
     // 订单已按平台分子菜单，列表不再显示平台角标
     return kind === 'orders' ? <ProductCell row={r} /> : <ProductCell row={r} sub={String(r.category || '')} />
@@ -100,13 +100,13 @@ function cell(kind: RecordKind, key: string, r: Row) {
         <Avatar text={String(v).slice(-2)} size="sm" round />
         <div>
           <strong>{String(v)}</strong>
-          <small>{String(r.externalId || '')}</small>
+          {r.externalId && String(r.externalId).toLowerCase() !== String(v).toLowerCase() && <small>{String(r.externalId)}</small>}
         </div>
       </div>
     )
   if (key === 'ratio') return v == null ? '待确认' : <span title={String(r.ratioNote || '')}>{String(v)}%</span>
   // 订单的返现用户：标出归属方式，按商品匹配等非联盟标识的关联便于核对
-  if (kind === 'orders' && key === 'user' && r.userId && r.attribution && r.attribution !== '联盟标识')
+  if (kind === 'orders' && key === 'user' && r.userId && r.attribution && !['联盟标识', '已关联'].includes(String(r.attribution)))
     return (
       <div>
         {String(v)}
@@ -222,9 +222,10 @@ export function Records({ kind, notify, platform }: { kind: RecordKind; notify: 
         (r) =>
           (!status || r.status === status) &&
           (!date || String(r.createdAt).startsWith(date)) &&
-          Object.values(r).join(' ').toLowerCase().includes(query.toLowerCase()),
+          // 用户管理只按用户名检索
+          (kind === 'users' ? String(r.name ?? '') : Object.values(r).join(' ')).toLowerCase().includes(query.trim().toLowerCase()),
       ),
-    [rows, status, date, query],
+    [rows, status, date, query, kind],
   )
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const current = Math.min(page, pages)
@@ -268,11 +269,11 @@ export function Records({ kind, notify, platform }: { kind: RecordKind; notify: 
 
       <Card className="list-card">
         <div className="toolbar">
-          <TextField dense icon={Search} placeholder="搜索商品、用户或编号" aria-label="搜索" value={query} onChange={(e) => setQuery(e.target.value)} className="toolbar-search" />
-          {kind !== 'rebates' && (
+          <TextField dense icon={Search} placeholder={kind === 'users' ? '搜索用户名' : '搜索商品、用户或编号'} aria-label="搜索" value={query} onChange={(e) => setQuery(e.target.value)} className="toolbar-search" />
+          {kind !== 'rebates' && kind !== 'users' && (
             <Select dense aria-label="状态" value={status} onChange={setStatus} options={[['', '全部状态'], ...statuses.map((s): [string, string] => [s, statusLabel(s)])]} />
           )}
-          <DatePicker dense aria-label="日期" value={date} onChange={setDate} />
+          {kind !== 'users' && <DatePicker dense aria-label="日期" value={date} onChange={setDate} />}
           {filtering && <IconButton icon={X} label="清除筛选" onClick={reset} />}
           {kind === 'orders' && (
             <>
@@ -479,7 +480,9 @@ function RecordDetail({
           )
         ) : (
           <dl className="desc-list">
-            {columns.map(([key, label]) => (
+            {columns
+              .filter(([key]) => !(key === 'paidAmount' && row.paidAmount == null))
+              .map(([key, label]) => (
               <div key={key}>
                 <dt>{label}</dt>
                 <dd>{cell(kind, key, row)}</dd>
@@ -493,7 +496,7 @@ function RecordDetail({
             hint="联盟未回传用户标识时，可在这里手动关联；同一订单号的所有商品一起关联"
             value={owner}
             onChange={setOwner}
-            options={[['', '未关联'], ...users.map((u): [string, string] => [u.id, `${u.name}${u.externalId ? `（${u.externalId}）` : ''}`])]}
+            options={[['', '未关联'], ...users.map((u): [string, string] => [u.id, `${u.name}${u.externalId && String(u.externalId).toLowerCase() !== String(u.name).toLowerCase() ? `（${u.externalId}）` : ''}`])]}
           />
         )}
         {kind === 'users' && (
