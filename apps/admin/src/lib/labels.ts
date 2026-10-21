@@ -8,6 +8,7 @@ const labels: Record<string, string> = {
   SETTLED: '已结算',
   COMPLETED: '已完成',
   CANCELLED: '已取消',
+  INVALID: '无效（拆单）',
   UNATTRIBUTED: '待核实归属',
   PENDING_REVIEW: '待审核',
   PENDING_PAYMENT: '待打款',
@@ -23,7 +24,7 @@ export const statusTone = (value: string): Tone =>
     ? 'success'
     : ['FAILED', 'REJECTED', 'DISABLED'].includes(value)
       ? 'error'
-      : value === 'CANCELLED'
+      : value === 'CANCELLED' || value === 'INVALID'
         ? 'secondary'
         : ['PENDING_REVIEW', 'PENDING_PAYMENT', 'UNATTRIBUTED'].includes(value)
           ? 'warning'

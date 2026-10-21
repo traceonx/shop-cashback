@@ -120,7 +120,6 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
     }
     if (next.orderSource === 'official-sc') next.orderSource = 'official'
     if (next.orderSource && !['official', 'ecapi'].includes(next.orderSource)) throw new BadRequestException('订单数据源无效')
-    if (next.autoMatch && !['true', 'false'].includes(next.autoMatch)) throw new BadRequestException('自动关联开关无效')
     if (next.perUserAdzone && !['true', 'false'].includes(next.perUserAdzone)) throw new BadRequestException('独立推广位开关无效')
     next.publicUrl = normalizePublicUrl(next.publicUrl) || ''
     if (next.pid && !/^mm_\d+_\d+_\d+$/.test(next.pid)) throw new BadRequestException('PID 格式应为 mm_账号_媒体_推广位')

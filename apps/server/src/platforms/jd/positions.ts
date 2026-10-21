@@ -1,7 +1,7 @@
 // 京东「一人一个推广位」：每个返现用户固定绑定一个京东联盟推广位，转链时传该推广位 ID（positionId），
 // 订单行里的 positionId 即可精确对应到用户。positionId 不需要额外权限（subUnionId 子联盟 ID 需京东单独开通）。
 // 推广位由管理员在京东联盟后台「推广管理 → 推广位」建好后填入「推广位池」（positionPool），取第一个未绑定的；
-// 池子用完时使用默认推广位，订单按商品匹配兜底。绑定后不回收。
+// 池子用完时使用默认推广位（订单不关联用户，并提醒管理员补充）。绑定后不回收。
 // 绑定关系保存在 system_configs：jd-position:<推广位ID> → 用户，jd-position-user:<用户ID> → 推广位（成对写入，主键唯一兜底并发）。
 import { BadRequestException } from '@nestjs/common'
 import type { PlatformConfig } from '../types'

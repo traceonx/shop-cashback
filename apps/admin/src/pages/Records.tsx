@@ -84,7 +84,8 @@ const PAGE_SIZE = 10
 /** 单元格渲染（列表与详情共用） */
 function cell(kind: RecordKind, key: string, r: Row) {
   const v = r[key]
-  if (key === 'status') return <StatusChip value={String(v)} />
+  // 订单状态显示联盟原始状态名（如「无效-拆单」），配色按换算后的状态
+  if (key === 'status') return <StatusChip value={String(v)} text={kind === 'orders' && r.rawStatusText ? String(r.rawStatusText) : null} />
   if (key === 'platform') return <PlatformTag platform={String(v ?? '')} />
   if (key === 'settlement') {
     const [tone, text] = (({ SETTLED: ['success', '已结算'], INVALID: ['secondary', '已失效'] }) as Record<string, ['success' | 'secondary', string]>)[String(v)] || ['warning', '未结算']
@@ -105,7 +106,7 @@ function cell(kind: RecordKind, key: string, r: Row) {
       </div>
     )
   if (key === 'ratio') return v == null ? '待确认' : <span title={String(r.ratioNote || '')}>{String(v)}%</span>
-  // 订单的返现用户：标出归属方式，按商品匹配等非联盟标识的关联便于核对
+  // 订单的返现用户：标出归属方式，人工关联及旧版本按商品匹配的关联便于核对
   if (kind === 'orders' && key === 'user' && r.userId && r.attribution && !['联盟标识', '已关联'].includes(String(r.attribution)))
     return (
       <div>
@@ -120,7 +121,7 @@ function cell(kind: RecordKind, key: string, r: Row) {
           ? '未绑定'
           : key === 'settledAt' && r.settlement === 'PENDING'
           ? '未结算'
-          : key === 'completedAt' && r.status !== 'CANCELLED'
+          : key === 'completedAt' && r.status !== 'CANCELLED' && r.status !== 'INVALID'
             ? // 淘宝订单接口不返回确认收货时间
               r.platform === '淘宝' ? '未获取' : '未完成'
             : '—'}

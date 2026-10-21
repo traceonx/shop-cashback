@@ -4,7 +4,7 @@
 //   1. 推广位池（adzonePool）：管理员在淘宝联盟后台建好、填进配置的 PID，取第一个未绑定的；
 //   2. 池子用完且开启喵有券淘宝接入时，调用喵有券 taoke/adzoneCreate 自动创建
 //      （https://www.ecapi.cn/index/index/openapi/id/333.shtml?ptype=1，付费会员接口），建在默认 PID 的同一网站下；
-//   3. 都不行时返回 null，由调用方使用默认 PID（订单按商品匹配兜底）。
+//   3. 都不行时返回 null，由调用方使用默认 PID（订单不关联用户，并提醒管理员补充）。
 // 绑定后不回收：推广位一直属于这个用户，旧链接多久以后下单都能对上。
 import { BadRequestException } from '@nestjs/common'
 import type { PlatformConfig } from '../types'

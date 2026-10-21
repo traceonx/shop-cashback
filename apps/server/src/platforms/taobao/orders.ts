@@ -11,6 +11,9 @@ import { TopError, topRequest } from './index'
 
 const tkStatus: Record<string, PlatformOrderStatus> = { '12': 'PAID', '13': 'CANCELLED', '14': 'COMPLETED', '3': 'COMPLETED' }
 export const taobaoOrderStatus = (code: string) => tkStatus[code] || 'UNATTRIBUTED'
+/** 淘宝联盟 tk_status 原始含义，后台原样展示 */
+export const taobaoOrderStatusText = (code: string) =>
+  ({ '12': '付款', '13': '失效', '14': '确认收货', '3': '结算' } as Record<string, string>)[code] ?? (/^\d+$/.test(code) ? `状态码 ${code}` : null)
 
 const list = (v: any, key: string): any[] => (Array.isArray(v) ? v : Array.isArray(v?.[key]) ? v[key] : v?.[key] ? [v[key]] : [])
 const cents = (v: unknown) => (v == null || v === '' ? null : decimalCents(String(v)))

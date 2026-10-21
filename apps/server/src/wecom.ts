@@ -129,8 +129,6 @@ export type OrderEvent = {
   commissionCents: number | null
   imageUrl?: string | null
   url?: string | null
-  /** 按商品匹配关联的订单（无联盟回传标识），提醒用户核对 */
-  matched?: boolean
 }
 const platformName: Record<string, string> = { jd: '京东', taobao: '淘宝' }
 const orderHead = {
@@ -156,7 +154,6 @@ export function orderNews(e: OrderEvent, rebate: number, total: number): News {
     !cancelled && e.amountCents ? `付款金额：${yuan(e.amountCents)}` : null,
     cancelled ? null : `本单返现：${yuan(rebate)}`,
     `累计返利：${yuan(total)}`,
-    e.matched ? '按你转过的商品自动匹配，如不是你的订单请回复说明' : null,
   ].filter(Boolean)
   return {
     title: orderHead[e.kind],
@@ -187,8 +184,8 @@ async function totalRebate(userId: string, basisPoints: number, unsettledOnly = 
   for (const o of orders) {
     const plugin = listPlatforms().find((p) => p.id === o.platform)
     const status = o.status === 'UNATTRIBUTED' && plugin ? plugin.orderStatus(o.rawStatus || '') : o.status
-    // 已取消、未付款的订单不计入返利
-    if (status === 'CANCELLED' || status === 'CREATED') continue
+    // 已取消、无效（拆单父单等）、未付款的订单不计入返利
+    if (status === 'CANCELLED' || status === 'INVALID' || status === 'CREATED') continue
     if (o.rebateCents != null) {
       if (!unsettledOnly) sum += Number(o.rebateCents)
       continue
@@ -292,7 +289,7 @@ export async function processInbox() {
             const plugin = plugins.find((p) => p.id === o.platform)
             return { o, status: o.status === 'UNATTRIBUTED' && plugin ? plugin.orderStatus(o.rawStatus || '') : o.status }
           })
-          .filter(({ status }) => status !== 'CANCELLED' && (!pendingOnly || status === 'PAID'))
+          .filter(({ status }) => status !== 'CANCELLED' && status !== 'INVALID' && (!pendingOnly || status === 'PAID'))
           .slice(0, take)
         const label: Record<string, string> = { CREATED: '待付款', PAID: '已付款，待结算', COMPLETED: '已完成', UNATTRIBUTED: '待核实' }
         reply = rows.length

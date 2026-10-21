@@ -147,19 +147,32 @@ export function jdOrderAmounts(value: unknown) {
   const total =
     price !== null && Number.isSafeInteger(quantity) && quantity > 0 ? BigInt(price) * BigInt(quantity) : null
   const completed = String(raw.validCode) === '17'
-  const cancelled = String(raw.validCode) === '3'
+  // 取消（3）及其他 15 以下的无效码（拆单、违规等）都不产生佣金
+  const cancelled = jdVoid(String(raw.validCode ?? ''))
   return {
     amount: total !== null && total <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(total) : null,
     commission: cancelled ? 0 : decimalCents(completed ? (raw.actualFee ?? raw.estimateFee) : raw.estimateFee),
     commissionBase: decimalCents(completed ? (raw.actualCosPrice ?? raw.estimateCosPrice) : raw.estimateCosPrice),
   }
 }
+/** 京东联盟 validCode 原始含义（订单查询接口文档），后台原样展示 */
+const JD_STATUS_TEXT: Record<string, string> = {
+  '-1': '未知', '2': '无效-拆单', '3': '无效-取消', '4': '无效-京东帮帮主订单', '5': '无效-账号异常', '6': '无效-赠品类目不返佣',
+  '7': '无效-校园订单', '8': '无效-企业订单', '9': '无效-团购订单', '11': '无效-乡村推广员下单', '13': '无效-违规订单',
+  '14': '无效-来源与备案网址不符', '15': '待付款', '16': '已付款', '17': '已完成', '19': '无效-佣金比例为0',
+  '20': '无效-此复购订单对应的首购订单无效', '21': '无效-云店订单', '22': '无效-PLUS会员佣金比例为0', '23': '无效-支付有礼',
+  '24': '已付定金', '25': '无效-拼购订单',
+}
+export const jdOrderStatusText = (code: string) => JD_STATUS_TEXT[code] ?? (/^\d+$/.test(code) ? `状态码 ${code}` : null)
+/** 无效订单（拆单、取消、违规、不返佣等），不会结算：15 以下的状态码及文档中标为「无效」的状态码 */
+const jdVoid = (code: string) => /^\d+$/.test(code) && (Number(code) < 15 || !!JD_STATUS_TEXT[code]?.startsWith('无效'))
+/**
+ * 京东订单状态：2「无效-拆单」是拆单后作废的父单，用户实际付款的是拆出的子单，记为 INVALID（不计返现、不通知）；
+ * 其余 15 以下的无效码对用户而言等同取消。
+ */
 export function jdOrderStatus(code: string): PlatformOrderStatus {
-  return (
-    ({ '3': 'CANCELLED', '15': 'CREATED', '16': 'PAID', '17': 'COMPLETED' } as Record<string, PlatformOrderStatus>)[
-      code
-    ] || 'UNATTRIBUTED'
-  )
+  const known = ({ '2': 'INVALID', '15': 'CREATED', '16': 'PAID', '17': 'COMPLETED', '24': 'CREATED' } as Record<string, PlatformOrderStatus>)[code]
+  return known || (jdVoid(code) ? 'CANCELLED' : 'UNATTRIBUTED')
 }
 export function normalizeOrder(raw: any): PlatformOrder {
   if (
@@ -214,8 +227,7 @@ export async function resolveJdSku(input: string): Promise<string | undefined> {
 export function jdOrderSettlement(value: unknown) {
   const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
   const code = String(raw.validCode ?? '')
-  // validCode 15 以下（拆单、取消、违规等）均为无效订单，不会结算
-  if (code !== '' && Number(code) < 15) return { state: 'INVALID' as const, settledAt: null }
+  if (jdVoid(code)) return { state: 'INVALID' as const, settledAt: null }
   const m = /^(\d{4})(\d{2})(\d{2})$/.exec(String(raw.payMonth ?? ''))
   if (code === '17' && m && m[0] !== '00000000') {
     const day = `${m[1]}-${m[2]}-${m[3]}`
@@ -225,6 +237,7 @@ export function jdOrderSettlement(value: unknown) {
 }
 export const jdPlugin: PlatformPlugin = {
   orderStatus: jdOrderStatus,
+  orderStatusText: jdOrderStatusText,
   orderSettlement: jdOrderSettlement,
   orderAmounts: jdOrderAmounts,
   orderImage: jdOrderImage,

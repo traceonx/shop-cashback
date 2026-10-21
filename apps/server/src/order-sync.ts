@@ -2,10 +2,8 @@ import { BadRequestException } from '@nestjs/common'
 import { db, json } from './database'
 import { readConfig } from './integrations'
 import { platform, listPlatforms } from './platforms/registry'
-import { notifyOrder, type OrderEvent } from './wecom'
-import { ownerBySku } from './attribution'
+import { notifyAdmin, notifyOrder, type OrderEvent } from './wecom'
 import { dbPositionStore } from './platforms/jd/positions'
-import { ownerByTaobaoProduct } from './attribution-taobao'
 import { mergeTaobaoRaw } from './platforms/taobao/web-core'
 import { normalizeTaobaoOrder } from './platforms/taobao/orders'
 import { queryWebOrders } from './platforms/taobao/web'
@@ -39,6 +37,12 @@ export function orderEventKind(prev: string | undefined, next: string): OrderEve
   if (next === 'CANCELLED') return prev === 'PAID' || prev === 'COMPLETED' ? 'cancelled' : null
   return null
 }
+/**
+ * 「下单成功」通知按「同一笔购买」去重的键：同用户、同平台、同商品、同下单时间。
+ * 京东拆单会把已付款订单作废（无效-拆单）并生成新订单号，下单时间与商品不变，按订单行通知会重复推送。
+ */
+export const purchaseKey = (platform: string, userId: string, sku: string, placedAt: Date) =>
+  `notify:created:${platform}:${userId}:${sku}:${placedAt.toISOString()}`
 export async function startOrderSync(
   actor: string,
   trace: string,
@@ -202,6 +206,8 @@ async function processOrderStep(): Promise<boolean> {
       if (page.rows.length) console.log(`[订单同步] ${c.platform} ${from.toISOString()} 第 ${c.page} 页导入 ${page.rows.length} 条`)
       if (done) console.log(`[订单同步] ${c.platform} 同步完成，共 ${next.count} 条`)
       const events: OrderEvent[] = []
+      // 新入库、已付款却没有用户推广位标识的订单（用默认推广位或别人分享的链接下单），提醒管理员人工关联
+      const unowned: string[] = []
       await db.$transaction(
         async (tx) => {
           const held = await tx.syncJob.updateMany({
@@ -214,8 +220,6 @@ async function processOrderStep(): Promise<boolean> {
             },
           })
           if (!held.count) return
-          // 淘宝按商品匹配下单用户：渠道配置开关，默认开启
-          const taobaoMatch = plugin.id === 'taobao' && (await readConfig('taobao')).autoMatch !== 'false'
           for (const row of page.rows) {
             const tracking = row.trackingCode
               ? await tx.userTrackingCode.findUnique({
@@ -255,27 +259,20 @@ async function processOrderStep(): Promise<boolean> {
               // 网页常缺商品 ID / 结算日期等字段；合并后重新计算金额，不能用 null 擦掉官方结果。
               Object.assign(row, normalizeTaobaoOrder(mergeTaobaoRaw(existing.rawData, row.raw)))
             }
-            // 优先用联盟回传的用户标识；未回传时按「下单前谁转过这个商品」匹配，仅唯一时关联
-            const owner = promotion
-              ? tracking!.userId
-              : positionOwner && !existing?.userId
-                ? positionOwner
-                : existing?.userId
-                ? null
-                : plugin.id === 'taobao'
-                  ? taobaoMatch
-                    ? await ownerByTaobaoProduct(tx, plugin.accountId, row.sku, row.title, row.placedAt)
-                    : null
-                  : await ownerBySku(tx, plugin.accountId, row.sku, row.placedAt)
-            const attribution = owner ? (promotion || positionOwner ? 'TRACKING' : 'PRODUCT') : undefined
-            if (owner && existing?.userId && owner !== existing.userId)
-              throw new BadRequestException('订单用户标识冲突，已停止同步，请人工核对')
+            // 只按联盟回传的标识关联用户：京东 subUnionId / 用户推广位，淘宝用户推广位（adzone_id）。
+            // 订单内容按联盟返回原样入库，不再按商品猜测用户，也不把同订单其他行挂到同一用户。
+            const traced = promotion ? tracking!.userId : positionOwner
+            // 旧版本按商品 / 同订单猜测的归属，以推广位为准纠正；联盟标识或人工关联的归属不覆盖
+            const guessed = existing?.attribution === 'PRODUCT' || existing?.attribution === 'SIBLING'
+            const owner = traced && (!existing?.userId || guessed || traced === existing.userId) ? traced : null
+            if (promotion && !owner && existing?.userId) throw new BadRequestException('订单用户标识冲突，已停止同步，请人工核对')
             const key = {
               platform: plugin.id,
               accountId: plugin.accountId,
               externalOrderId: row.orderId,
               externalLineId: row.lineId,
             }
+            const attribution = owner ? 'TRACKING' : undefined
             const common = {
               ...(owner ? { userId: owner, attribution } : {}),
               status: row.status,
@@ -284,6 +281,7 @@ async function processOrderStep(): Promise<boolean> {
               commissionCents: row.commissionCents === null ? null : BigInt(row.commissionCents),
               completedAt: row.completedAt,
             }
+            let pending: OrderEvent | null = null
             // 状态有变化（新订单或状态更新）时通知下单用户；只通知近期订单，避免同步历史时刷屏
             const notifyUser = owner || existing?.userId
             const recent = Date.now() - row.placedAt.getTime() < (existing ? 30 : 2) * 86400000
@@ -294,21 +292,19 @@ async function processOrderStep(): Promise<boolean> {
             if (notifyUser && recent && !gift && (newlyOwned || existing?.status !== row.status)) {
               const kind = orderEventKind(newlyOwned ? undefined : existing?.status, row.status)
               if (kind)
-                events.push({
+                pending = {
                   userId: notifyUser,
                   kind,
                   platform: plugin.id,
                   title: row.title,
-                  // 按商品匹配的订单提醒用户核对
-                  matched: (attribution ?? existing?.attribution) === 'PRODUCT',
                   // 付款金额：优先联盟的计佣金额，未付款时为 0 则用单价 × 数量
                   amountCents: row.commissionBaseCents || plugin.orderAmounts(row.raw).amount || null,
                   commissionCents: row.commissionCents,
                   imageUrl: plugin.orderImage(row.raw),
                   url: plugin.id === 'jd' && /^\d+$/.test(row.sku) ? `https://item.jd.com/${row.sku}.html` : null,
-                })
+                }
             }
-            await tx.affiliateOrder.upsert({
+            const saved = await tx.affiliateOrder.upsert({
               where: { platform_accountId_externalOrderId_externalLineId: key },
               create: {
                 ...key,
@@ -332,20 +328,26 @@ async function processOrderStep(): Promise<boolean> {
                   },
                 },
               },
+              select: { id: true },
             })
-          }
-          // 同一订单号的其他订单行（赠品、凑单商品等）未关联时，跟随已关联的订单行归属同一用户；
-          // 订单行之间用户不一致时不处理，留待人工核对
-          for (const orderId of new Set(page.rows.map((r) => r.orderId))) {
-            const where = { platform: plugin.id, accountId: plugin.accountId, externalOrderId: orderId }
-            const owners = await tx.affiliateOrder.findMany({ where: { ...where, userId: { not: null } }, select: { userId: true }, distinct: ['userId'], take: 2 })
-            if (owners.length === 1) await tx.affiliateOrder.updateMany({ where: { ...where, userId: null }, data: { userId: owners[0].userId, attribution: 'SIBLING' } })
+            if (pending?.kind === 'created') {
+              // 同一笔购买只通知一次「下单成功」；记录在订单状态历史里，eventKey 唯一
+              const eventKey = row.sku ? purchaseKey(plugin.id, pending.userId, row.sku, row.placedAt) : `notify:created:${saved.id}`
+              if (await tx.orderStatusHistory.findUnique({ where: { eventKey }, select: { id: true } })) pending = null
+              else await tx.orderStatusHistory.create({ data: { orderId: saved.id, status: row.status, rawStatus: row.rawStatus, eventKey } })
+            }
+            if (pending) events.push(pending)
+            if (!existing && !owner && row.status === 'PAID' && !gift && Date.now() - row.placedAt.getTime() < 2 * 86400000)
+              unowned.push(`${row.title.slice(0, 30)}｜订单 ${row.orderId}${row.positionId ? `｜推广位 ${row.positionId}` : ''}`)
           }
         },
         { timeout: 30000 },
       )
       // 事务提交后再发通知，发送失败不影响同步
       for (const e of events) await notifyOrder(e).catch((err) => console.warn(`[企业微信] 订单通知发送失败：${err instanceof Error ? err.message : err}`))
+      if (unowned.length)
+        await notifyAdmin([`📦 ${unowned.length} 笔新订单未关联用户（${plugin.name}）`, ...unowned.slice(0, 10), unowned.length > 10 ? `……另有 ${unowned.length - 10} 笔` : '', '订单未带用户推广位，请在后台订单列表人工关联。'].filter(Boolean).join('\n'))
+          .catch((err) => console.warn(`[管理员通知] 未关联订单提醒未发送：${err instanceof Error ? err.message : err}`))
     } catch (e) {
       console.warn(`[订单同步] 失败：${e instanceof Error ? e.message : e}`)
       await db.syncJob.updateMany({

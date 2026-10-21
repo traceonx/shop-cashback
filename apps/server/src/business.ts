@@ -1,4 +1,5 @@
 import { wakeAutoSync } from './auto-sync'
+import { alertAdmin } from './admin-alert'
 import { randomBytes } from 'node:crypto'
 import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
@@ -17,7 +18,9 @@ export async function settings() {
 }
 /** 订单当前状态：待核实归属的订单按平台原始状态换算 */
 /** 计入订单统计：已付款及之后的有效订单 */
-const counted = (status: string) => status !== 'CANCELLED' && status !== 'CREATED'
+const counted = (status: string) => !['CANCELLED', 'INVALID', 'CREATED'].includes(status)
+/** 不产生返现的订单：已取消、联盟判定无效（如京东拆单父单） */
+const voided = (status: string) => status === 'CANCELLED' || status === 'INVALID'
 function orderStatus(o: { platform: string; status: string; rawStatus: string | null }) {
   if (o.status !== 'UNATTRIBUTED') return o.status
   try {
@@ -129,7 +132,7 @@ export async function convert(content: string, actor: string, trace: string, use
     const user = await db.user.findUnique({ where: { id: userId } })
     if (!user?.enabled) throw new BadRequestException('返现用户不存在或已禁用')
   }
-  // 淘宝：每个用户用自己的推广位转链，订单回传的 adzone_id 即可精确关联用户；拿不到推广位时退回默认 PID（按商品匹配兜底）
+  // 淘宝：每个用户用自己的推广位转链，订单回传的 adzone_id 即可精确关联用户；拿不到推广位时退回默认 PID（订单不关联用户）
   if (userId && plugin.id === 'taobao' && perUserAdzoneEnabled(c)) {
     try {
       const adzone = await ensureUserAdzone(dbAdzoneStore(), c, useThird ? third : null, userId)
@@ -137,9 +140,10 @@ export async function convert(content: string, actor: string, trace: string, use
       if (adzone && pid) {
         trackingCode = adzone
         conf = { ...c, pid, adzoneId: adzone }
-      }
+      } else void positionShortage('taobao', userId, '淘宝推广位池已用完（且未能自动创建推广位）')
     } catch (e) {
       notices.push(`用户专属推广位分配失败，已使用默认推广位：${(e as Error).message}`)
+      void positionShortage('taobao', userId, `淘宝用户推广位分配失败：${(e as Error).message}`)
     }
   }
   // 京东：每个用户用推广位池里固定绑定的推广位转链，订单的 positionId 即可关联用户；池里没有空闲推广位时用默认推广位
@@ -150,11 +154,16 @@ export async function convert(content: string, actor: string, trace: string, use
       try {
         const positionId = await ensureUserPosition(dbPositionStore(), pool, userId)
         if (positionId) {
+          void jdPoolLow(pool)
           conf = { ...c, positionId }
           if (third) thirdConf = { ...third, positionId }
-        } else notices.push('京东推广位池已用完，已使用默认推广位')
+        } else {
+          notices.push('京东推广位池已用完，已使用默认推广位')
+          void positionShortage('jd', userId, '京东推广位池已用完')
+        }
       } catch (e) {
         notices.push(`用户专属推广位分配失败，已使用默认推广位：${(e as Error).message}`)
+        void positionShortage('jd', userId, `京东用户推广位分配失败：${(e as Error).message}`)
       }
     }
   }
@@ -215,6 +224,22 @@ export async function convert(content: string, actor: string, trace: string, use
     throw e
   }
 }
+/** 推广位不足：用户转链只能用默认推广位，订单无法关联到该用户，提醒管理员补充推广位池（每个平台 6 小时内提醒一次） */
+async function positionShortage(platformId: 'jd' | 'taobao', userId: string, reason: string) {
+  const user = await db.user.findUnique({ where: { id: userId }, select: { name: true } }).catch(() => null)
+  const name = platformId === 'jd' ? '京东' : '淘宝'
+  await alertAdmin(
+    `position-shortage:${platformId}`,
+    [`⚠️ ${name}推广位不足`, reason, `受影响用户：${user?.name || userId}`, `该用户本次用默认推广位转链，订单不会自动关联到用户。`, `请在后台「推广位管理」补充${name}推广位池。`].join('\n'),
+  )
+}
+/** 京东推广位池快用完时提前提醒（剩余不超过 2 个；每 6 小时一次） */
+async function jdPoolLow(pool: string[]) {
+  const used = await dbPositionStore().used().catch(() => null)
+  if (!used) return
+  const free = pool.filter((id) => !used.has(id)).length
+  if (free <= 2) await alertAdmin('position-low:jd', [`⚠️ 京东推广位池即将用完`, `剩余空闲推广位：${free} 个（共 ${pool.length} 个）`, `新用户首次转链会占用一个推广位，用完后新用户的订单无法自动关联。`, `请在后台「推广位管理」补充京东推广位池。`].join('\n'))
+}
 export async function listOrders(platformId?: string) {
   const defaults = await settings()
   return (
@@ -230,7 +255,7 @@ export async function listOrders(platformId?: string) {
     const ratio = snapshot?.basisPoints != null ? snapshot.basisPoints / 100 : defaults.ratio
     const commission = values.commission ?? centsNumber(o.commissionCents)
     const preview =
-      currentStatus === 'CANCELLED'
+      voided(currentStatus)
         ? 0
         : ['COMPLETED', 'PAID', 'CREATED'].includes(currentStatus) && commission !== null
           ? Number((BigInt(commission) * BigInt(Math.round(ratio * 100))) / 10000n)
@@ -245,17 +270,19 @@ export async function listOrders(platformId?: string) {
       platform: ({ jd: '京东', taobao: '淘宝', pdd: '拼多多' } as Record<string, string>)[o.platform] || o.platform,
       user: o.user?.name || '未关联用户',
       userId: o.userId || '',
-      attribution: o.userId ? (({ TRACKING: '联盟标识', PRODUCT: '按商品匹配', SIBLING: '同订单关联', MANUAL: '人工关联' }) as Record<string, string>)[o.attribution || ''] || '已关联' : '未关联',
+      attribution: o.userId ? (({ TRACKING: '联盟标识', PRODUCT: '按商品匹配（旧）', SIBLING: '同订单关联（旧）', MANUAL: '人工关联' }) as Record<string, string>)[o.attribution || ''] || '已关联' : '未关联',
       amount: centsNumber(o.amountCents) ?? values.amount,
       commissionBase: values.commissionBase,
       paidAmount: values.commissionBase ?? centsNumber(o.paidAmountCents),
       imageUrl: platform(o.platform).orderImage(o.rawData),
-      rebate: currentStatus === 'CANCELLED' ? 0 : (centsNumber(o.rebateCents) ?? preview),
+      rebate: voided(currentStatus) ? 0 : (centsNumber(o.rebateCents) ?? preview),
       ratioNote: snapshot?.basisPoints != null ? '下单比例快照' : '按当前全局规则预估，非下单快照',
       ratio,
       commission,
       status: o.status === 'UNATTRIBUTED' ? platform(o.platform).orderStatus(o.rawStatus || '') : o.status,
       rawStatus: o.rawStatus,
+      // 联盟原始状态原样展示（如京东「无效-拆单」）
+      rawStatusText: platform(o.platform).orderStatusText?.(o.rawStatus || '') ?? null,
       createdAt: dateText(o.placedAt),
       completedAt: o.completedAt ? dateText(o.completedAt) : null,
       ...settlementOf(o.platform, o.rawData, currentStatus),
@@ -270,7 +297,7 @@ function positionIdOf(platformId: string, raw: unknown) {
 }
 /** 佣金结算状态与结算时间；平台未提供时按订单状态推断（已取消为已失效） */
 function settlementOf(platformId: string, raw: unknown, status: string) {
-  const s = platform(platformId).orderSettlement?.(raw) ?? { state: status === 'CANCELLED' ? 'INVALID' : 'PENDING', settledAt: null }
+  const s = platform(platformId).orderSettlement?.(raw) ?? { state: voided(status) ? 'INVALID' : 'PENDING', settledAt: null }
   return { settlement: s.state, settledAt: s.settledAt }
 }
 export async function listWithdrawals() {

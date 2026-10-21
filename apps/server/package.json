@@ -1,7 +1,7 @@
 {
   "name": "@rebate/server",
   "private": true,
-  "version": "0.20.1",
+  "version": "0.21.0",
   "scripts": {
     "dev": "tsc && concurrently -k \"tsc --watch --preserveWatchOutput\" \"node --watch dist/main.js\"",
     "build": "tsc",

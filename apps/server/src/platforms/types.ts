@@ -1,6 +1,7 @@
 export type PlatformConfig = Record<string, string>
 export type ConfigField = readonly [key: string, label: string, secret: boolean]
-export type PlatformOrderStatus = 'CANCELLED' | 'CREATED' | 'PAID' | 'COMPLETED' | 'UNATTRIBUTED'
+/** INVALID：联盟判定的无效订单行（如京东拆单后的父单），不是用户取消，不产生返现、也不通知用户 */
+export type PlatformOrderStatus = 'CANCELLED' | 'CREATED' | 'PAID' | 'COMPLETED' | 'INVALID' | 'UNATTRIBUTED'
 export interface PlatformOrder {
   trackingCode: string | null
   /** 订单推广位 ID（京东 positionId），用户独立推广位时据此关联用户 */
@@ -30,6 +31,8 @@ export interface PlatformPlugin {
   orderImage(raw: unknown): string | null
   orderAmounts(raw: unknown): { amount: number | null; commission: number | null; commissionBase: number | null }
   orderStatus(rawStatus: string): PlatformOrderStatus
+  /** 联盟原始订单状态的中文名（后台原样展示），未知状态码返回 null */
+  orderStatusText?(rawStatus: string): string | null
   /** 佣金结算状态：SETTLED 已结算（settledAt 为结算日期文本）、PENDING 未结算、INVALID 已失效 */
   orderSettlement?(raw: unknown): { state: 'SETTLED' | 'PENDING' | 'INVALID'; settledAt: string | null }
   configured(config: PlatformConfig): boolean

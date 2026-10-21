@@ -17,7 +17,7 @@ export function JdPositionPanel({ it }: { it: ReturnType<typeof useIntegration> 
     <>
       <TextArea
         label="推广位池（用户独立推广位）"
-        hint="在京东联盟后台「推广管理 → 推广位」建好后填入推广位 ID，每行一个；用户首次转京东链接时固定绑定一个空闲推广位，订单按推广位精确关联用户。池子用完时使用默认推广位，订单按商品匹配。已绑定用户的推广位不能移除"
+        hint="在京东联盟后台「推广管理 → 推广位」建好后填入推广位 ID，每行一个；用户首次转京东链接时固定绑定一个空闲推广位，订单按推广位精确关联用户。池子用完时使用默认推广位，订单不自动关联用户。已绑定用户的推广位不能移除"
         rows={4}
         placeholder={'3100000001\n3100000002'}
         value={it.values.positionPool ?? ''}

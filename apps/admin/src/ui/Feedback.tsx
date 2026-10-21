@@ -39,10 +39,10 @@ export function Chip({ tone = 'primary', dot = false, children }: { tone?: Tone;
 }
 
 /** 业务状态标签（根据状态码自动配色与中文名） */
-export function StatusChip({ value }: { value: string }) {
+export function StatusChip({ value, text }: { value: string; text?: string | null }) {
   return (
     <Chip tone={statusTone(value)} dot>
-      {statusLabel(value)}
+      {text || statusLabel(value)}
     </Chip>
   )
 }

@@ -6,7 +6,7 @@ import { decimalCents, parseJdJson } from '../jd'
 import type { PlatformConfig, PlatformPlugin } from '../types'
 import { dateText } from '../../database'
 import { taobaoFields } from './config'
-import { queryTaobaoOrders, taobaoOrderAmounts, taobaoOrderImage, taobaoOrderSettlement, taobaoOrderStatus, orderSourceOf, type OrderDeps } from './orders'
+import { queryTaobaoOrders, taobaoOrderAmounts, taobaoOrderImage, taobaoOrderSettlement, taobaoOrderStatus, taobaoOrderStatusText, orderSourceOf, type OrderDeps } from './orders'
 
 const GATEWAY = 'https://eco.taobao.com/router/rest'
 const HOSTS = ['taobao.com', 'tmall.com', 'tmall.hk', 'tb.cn', 'yao.95095.com', 'liangxinyao.com']
@@ -267,6 +267,7 @@ export const taobaoPlugin: PlatformPlugin = {
   normalizeUrl: extractTaobaoUrl,
   // orders.ts 与本文件互相引用，用箭头函数延迟取值，避免加载顺序导致未定义
   orderStatus: (code) => taobaoOrderStatus(code),
+  orderStatusText: (code) => taobaoOrderStatusText(code),
   orderAmounts: (raw) => taobaoOrderAmounts(raw),
   orderImage: (raw) => taobaoOrderImage(raw),
   orderSettlement: (raw) => taobaoOrderSettlement(raw),
