@@ -21,6 +21,8 @@ export async function settings() {
 const counted = (status: string) => !['CANCELLED', 'INVALID', 'CREATED'].includes(status)
 /** 不产生返现的订单：已取消、联盟判定无效（如京东拆单父单） */
 const voided = (status: string) => status === 'CANCELLED' || status === 'INVALID'
+/** 京东拆单后作废的父单（validCode 2）：联盟后台不展示，后台订单列表与订单数同样不展示（仍入库用于去重） */
+const visibleOrders: Prisma.AffiliateOrderWhereInput = { NOT: { platform: 'jd', rawStatus: '2' } }
 function orderStatus(o: { platform: string; status: string; rawStatus: string | null }) {
   if (o.status !== 'UNATTRIBUTED') return o.status
   try {
@@ -74,7 +76,7 @@ export async function trends(days: number) {
 }
 export async function listUsers() {
   const list = await db.user.findMany({
-    include: { identities: true, wallet: true, tracking: true, _count: { select: { promotions: true, orders: true } } },
+    include: { identities: true, wallet: true, tracking: true, _count: { select: { promotions: true, orders: { where: visibleOrders } } } },
     orderBy: { createdAt: 'desc' },
   })
   // 用户绑定的推广位：淘宝存于 user_tracking_codes（推广位 ID），京东存于 system_configs（jd-position-user:<用户>）
@@ -244,7 +246,7 @@ export async function listOrders(platformId?: string) {
   const defaults = await settings()
   return (
     await db.affiliateOrder.findMany({
-      where: platformId ? { platform: platformId } : {},
+      where: platformId ? { platform: platformId, ...visibleOrders } : visibleOrders,
       include: { user: true, items: true },
       orderBy: { placedAt: 'desc' },
     })

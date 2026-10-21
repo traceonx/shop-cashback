@@ -84,7 +84,7 @@ const PAGE_SIZE = 10
 /** 单元格渲染（列表与详情共用） */
 function cell(kind: RecordKind, key: string, r: Row) {
   const v = r[key]
-  // 订单状态显示联盟原始状态名（如「无效-拆单」），配色按换算后的状态
+  // 订单状态显示联盟原始状态名（如「无效-取消」），配色按换算后的状态
   if (key === 'status') return <StatusChip value={String(v)} text={kind === 'orders' && r.rawStatusText ? String(r.rawStatusText) : null} />
   if (key === 'platform') return <PlatformTag platform={String(v ?? '')} />
   if (key === 'settlement') {
