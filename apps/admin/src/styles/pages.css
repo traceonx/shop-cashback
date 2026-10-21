@@ -745,3 +745,30 @@
     gap: 8px;
   }
 }
+
+/* ---------- 订单列表 ---------- */
+.order-times {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 8px;
+  margin: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.order-times dt {
+  color: var(--c-text-3);
+}
+.order-times dd {
+  margin: 0;
+  color: var(--c-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.order-times dd.is-settled {
+  color: var(--c-success);
+}
+.order-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}

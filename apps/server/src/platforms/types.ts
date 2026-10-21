@@ -29,12 +29,15 @@ export interface PlatformPlugin {
   maxHistoryDays: number
   maxWindowMs: number
   orderImage(raw: unknown): string | null
-  orderAmounts(raw: unknown): { amount: number | null; commission: number | null; commissionBase: number | null }
+  /** estimate：预估佣金（完成后 commission 为实际佣金，两者可能不同，如退货） */
+  orderAmounts(raw: unknown): { amount: number | null; commission: number | null; commissionBase: number | null; estimate?: number | null }
   orderStatus(rawStatus: string): PlatformOrderStatus
   /** 联盟原始订单状态的中文名（后台原样展示），未知状态码返回 null */
   orderStatusText?(rawStatus: string): string | null
-  /** 佣金结算状态：SETTLED 已结算（settledAt 为结算日期文本）、PENDING 未结算、INVALID 已失效 */
-  orderSettlement?(raw: unknown): { state: 'SETTLED' | 'PENDING' | 'INVALID'; settledAt: string | null }
+  /** 佣金结算状态：SETTLED 已结算（settledAt 为结算日期文本）、PENDING 未结算（expectedAt 为联盟给出的预计结算日期）、INVALID 已失效 */
+  orderSettlement?(raw: unknown): { state: 'SETTLED' | 'PENDING' | 'INVALID'; settledAt: string | null; expectedAt?: string | null }
+  /** 商品数量与退货数量（联盟未提供时为 null） */
+  orderReturns?(raw: unknown): { quantity: number; returned: number } | null
   configured(config: PlatformConfig): boolean
   normalizeUrl(content: string): string
   /** 是否已接入订单同步（未接入的平台不参与自动同步） */

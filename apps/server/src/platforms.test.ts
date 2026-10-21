@@ -50,8 +50,8 @@ test('短链识别商品且拒绝向非京东地址继续跳转', async () => {
 
 test('商品金额和佣金按订单阶段映射，取消单返现佣金为零', () => {
   assert.deepEqual(
-    jdOrderAmounts({ price: '278.40', skuNum: 2, validCode: 17, actualFee: '2.34', actualCosPrice: '77.90' }),
-    { amount: 55680, commission: 234, commissionBase: 7790 },
+    jdOrderAmounts({ price: '278.40', skuNum: 2, validCode: 17, actualFee: '2.34', actualCosPrice: '77.90', estimateFee: '2.40' }),
+    { amount: 55680, commission: 234, commissionBase: 7790, estimate: 240 },
   )
   assert.equal(jdOrderAmounts({ validCode: 16, actualFee: 0, estimateFee: '1.23' }).commission, 123)
   assert.equal(jdOrderAmounts({ validCode: 3, estimateFee: '1.23' }).commission, 0)
@@ -124,6 +124,10 @@ test('佣金结算状态：京东按 payMonth、淘宝按 tk_status', async () =
   assert.equal(jdOrderSettlement({ validCode: 17, payMonth: 0 }).state, 'PENDING')
   assert.equal(jdOrderSettlement({ validCode: 16 }).state, 'PENDING')
   assert.equal(jdOrderSettlement({ validCode: 3 }).state, 'INVALID')
+  // 未到结算日给出预计结算日期；商品全部退货（京东仍为已完成）记为已失效
+  assert.deepEqual(jdOrderSettlement({ validCode: 17, payMonth: 29991120, skuNum: 1 }), { state: 'PENDING', settledAt: null, expectedAt: '2999-11-20' })
+  assert.equal(jdOrderSettlement({ validCode: 17, payMonth: 20200120, skuNum: 3, skuReturnNum: 3 }).state, 'INVALID')
+  assert.equal(jdOrderSettlement({ validCode: 17, payMonth: 20200120, skuNum: 3, skuReturnNum: 1 }).state, 'SETTLED')
   assert.deepEqual(taobaoOrderSettlement({ tk_status: 3, tk_earning_time: '2026-10-20 10:00:00' }), { state: 'SETTLED', settledAt: '2026-10-20 10:00:00' })
   assert.equal(taobaoOrderSettlement({ tk_status: 13 }).state, 'INVALID')
   assert.equal(taobaoOrderSettlement({ tk_status: 12 }).state, 'PENDING')

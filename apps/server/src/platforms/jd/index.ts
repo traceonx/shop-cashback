@@ -152,6 +152,7 @@ export function jdOrderAmounts(value: unknown) {
   return {
     amount: total !== null && total <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(total) : null,
     commission: cancelled ? 0 : decimalCents(completed ? (raw.actualFee ?? raw.estimateFee) : raw.estimateFee),
+    estimate: decimalCents(raw.estimateFee),
     commissionBase: decimalCents(completed ? (raw.actualCosPrice ?? raw.estimateCosPrice) : raw.estimateCosPrice),
   }
 }
@@ -223,15 +224,27 @@ export async function resolveJdSku(input: string): Promise<string | undefined> {
   }
   return undefined
 }
-/** 京东佣金结算：payMonth 为结算日期 yyyyMMdd（0 表示未结算），日期已到即视为已结算；无效订单为已失效 */
+/** 京东商品数量与退货数量（skuNum / skuReturnNum） */
+export function jdOrderReturns(value: unknown) {
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const quantity = Number(raw.skuNum),
+    returned = Number(raw.skuReturnNum ?? 0)
+  return Number.isSafeInteger(quantity) && quantity > 0 && Number.isSafeInteger(returned) && returned >= 0 ? { quantity, returned } : null
+}
+/**
+ * 京东佣金结算：payMonth 为结算日期 yyyyMMdd（0 表示未结算），日期已到即视为已结算，未到为预计结算日期；
+ * 无效订单、商品全部退货的订单为已失效（京东仍标「已完成」，实际佣金为 0）
+ */
 export function jdOrderSettlement(value: unknown) {
   const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
   const code = String(raw.validCode ?? '')
-  if (jdVoid(code)) return { state: 'INVALID' as const, settledAt: null }
+  const r = jdOrderReturns(raw)
+  if (jdVoid(code) || (r && r.returned >= r.quantity)) return { state: 'INVALID' as const, settledAt: null }
   const m = /^(\d{4})(\d{2})(\d{2})$/.exec(String(raw.payMonth ?? ''))
   if (code === '17' && m && m[0] !== '00000000') {
     const day = `${m[1]}-${m[2]}-${m[3]}`
     if (new Date(`${day}T00:00:00+08:00`).getTime() <= Date.now()) return { state: 'SETTLED' as const, settledAt: day }
+    return { state: 'PENDING' as const, settledAt: null, expectedAt: day }
   }
   return { state: 'PENDING' as const, settledAt: null }
 }
@@ -239,6 +252,7 @@ export const jdPlugin: PlatformPlugin = {
   orderStatus: jdOrderStatus,
   orderStatusText: jdOrderStatusText,
   orderSettlement: jdOrderSettlement,
+  orderReturns: jdOrderReturns,
   orderAmounts: jdOrderAmounts,
   orderImage: jdOrderImage,
   id: 'jd',

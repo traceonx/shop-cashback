@@ -281,6 +281,8 @@ export async function listOrders(platformId?: string) {
       ratioNote: snapshot?.basisPoints != null ? '下单比例快照' : '按当前全局规则预估，非下单快照',
       ratio,
       commission,
+      estimateCommission: values.estimate ?? null,
+      ...(platform(o.platform).orderReturns?.(o.rawData) ?? {}),
       status: o.status === 'UNATTRIBUTED' ? platform(o.platform).orderStatus(o.rawStatus || '') : o.status,
       rawStatus: o.rawStatus,
       // 联盟原始状态原样展示（如京东「无效-拆单」）
@@ -300,7 +302,7 @@ function positionIdOf(platformId: string, raw: unknown) {
 /** 佣金结算状态与结算时间；平台未提供时按订单状态推断（已取消为已失效） */
 function settlementOf(platformId: string, raw: unknown, status: string) {
   const s = platform(platformId).orderSettlement?.(raw) ?? { state: voided(status) ? 'INVALID' : 'PENDING', settledAt: null }
-  return { settlement: s.state, settledAt: s.settledAt }
+  return { settlement: s.state, settledAt: s.settledAt, expectedSettleAt: s.expectedAt ?? null }
 }
 export async function listWithdrawals() {
   return (

@@ -29,12 +29,15 @@ const config: Record<RecordKind, { title: string; columns: Column[] }> = {
       ['product', '商品'],
       ['user', '返现用户'],
       ['paidAmount', '付款金额'],
+      ['commission', '佣金'],
       ['rebate', '预计返现'],
       ['ratio', '返现比例', true],
       ['status', '状态'],
-      ['createdAt', '下单时间'],
+      ['times', '时间'],
       ['settlement', '结算'],
-      ['settledAt', '佣金结算时间'],
+      ['createdAt', '下单时间', true],
+      ['completedAt', '完成时间', true],
+      ['settledAt', '佣金结算时间', true],
       ['externalOrderId', '订单号', true],
       ['positionId', '推广位 ID', true],
     ],
@@ -85,8 +88,42 @@ const PAGE_SIZE = 10
 function cell(kind: RecordKind, key: string, r: Row) {
   const v = r[key]
   // 订单状态显示联盟原始状态名（如「无效-取消」），配色按换算后的状态
-  if (key === 'status') return <StatusChip value={String(v)} text={kind === 'orders' && r.rawStatusText ? String(r.rawStatusText) : null} />
+  if (key === 'status') {
+    const chip = <StatusChip value={String(v)} text={kind === 'orders' && r.rawStatusText ? String(r.rawStatusText) : null} />
+    // 有退货时标出退货数量（全部退货的订单佣金为 0、不结算）
+    if (kind !== 'orders' || !Number(r.returned)) return chip
+    return (
+      <div className="order-status">
+        {chip}
+        <small className="cell-sub">{Number(r.returned) >= Number(r.quantity) ? '已全部退货' : `退货 ${r.returned} / ${r.quantity} 件`}</small>
+      </div>
+    )
+  }
   if (key === 'platform') return <PlatformTag platform={String(v ?? '')} />
+  // 订单时间合并为一列：下单 / 完成 / 结算（结算未到时显示联盟给出的预计结算日期）
+  if (key === 'times') {
+    const settle = r.settledAt ? String(r.settledAt) : r.expectedSettleAt ? `预计 ${r.expectedSettleAt}` : '—'
+    return (
+      <dl className="order-times">
+        <dt>下单</dt>
+        <dd>{String(r.createdAt ?? '—')}</dd>
+        <dt>完成</dt>
+        <dd>{r.completedAt ? String(r.completedAt) : '—'}</dd>
+        <dt>结算</dt>
+        <dd className={r.settledAt ? 'is-settled' : undefined}>{settle}</dd>
+      </dl>
+    )
+  }
+  // 佣金：完成后为实际佣金，与预估不同时（如退货）附上预估佣金
+  if (kind === 'orders' && key === 'commission') {
+    const changed = r.estimateCommission != null && r.estimateCommission !== v && r.status === 'COMPLETED'
+    return (
+      <div>
+        <span className="text-amount">{amount(v)}</span>
+        {changed && <small className="cell-sub">预估 {amount(r.estimateCommission)}</small>}
+      </div>
+    )
+  }
   if (key === 'settlement') {
     const [tone, text] = (({ SETTLED: ['success', '已结算'], INVALID: ['secondary', '已失效'] }) as Record<string, ['success' | 'secondary', string]>)[String(v)] || ['warning', '未结算']
     return <Chip tone={tone} dot>{text}</Chip>
@@ -94,7 +131,7 @@ function cell(kind: RecordKind, key: string, r: Row) {
   if (moneyKeys.includes(key)) return key === 'paidAmount' && v == null ? null : <span className="text-amount">{amount(v)}</span>
   if (key === 'product')
     // 订单已按平台分子菜单，列表不再显示平台角标
-    return kind === 'orders' ? <ProductCell row={r} /> : <ProductCell row={r} sub={String(r.category || '')} />
+    return kind === 'orders' ? <ProductCell row={r} sub={`订单 ${r.externalOrderId}`} /> : <ProductCell row={r} sub={String(r.category || '')} />
   if (key === 'name')
     return (
       <div className="cell-media">
@@ -354,7 +391,7 @@ export function Records({ kind, notify, platform }: { kind: RecordKind; notify: 
         <RecordDetail
           kind={kind}
           row={selected}
-          columns={allColumns}
+          columns={allColumns.filter((c) => c[0] !== 'times')}
           notify={notify}
           onClose={() => setSelected(null)}
           onChanged={() => {
