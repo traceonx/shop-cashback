@@ -119,6 +119,9 @@
   flex: 1;
   min-width: 220px !important;
 }
+.toolbar .toolbar-date {
+  min-width: 250px;
+}
 .sync-hint {
   display: inline-flex;
   align-items: center;

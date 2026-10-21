@@ -294,17 +294,20 @@ class AdminController {
     const order = await db.affiliateOrder.findUnique({ where: { id } })
     if (!order) throw new NotFoundException('订单不存在')
     const userId = body?.userId || null
-    if (userId && !(await db.user.findUnique({ where: { id: userId } }))) throw new NotFoundException('用户不存在')
-    // 同一订单号的所有订单行一起关联
-    await db.$transaction([
-      db.affiliateOrder.updateMany({
-        where: { platform: order.platform, accountId: order.accountId, externalOrderId: order.externalOrderId },
-        data: { userId, attribution: userId ? 'MANUAL' : null },
-      }),
-      db.auditLog.create({
-        data: { actorId: req.actor!.id, action: userId ? '手动关联订单用户' : '取消订单关联', targetId: order.externalOrderId, traceId: req.traceId!, diff: { from: order.userId, to: userId } },
-      }),
-    ])
+    // 只有没有归属的订单可以手动分配返现用户；已归属（联盟标识或已人工关联）的订单不能改动或取消
+    if (!userId) throw new BadRequestException('请选择返现用户')
+    if (!(await db.user.findUnique({ where: { id: userId } }))) throw new NotFoundException('用户不存在')
+    // 同一订单号的所有订单行一起关联；条件里带 userId: null，防止并发时覆盖已有归属
+    const where = { platform: order.platform, accountId: order.accountId, externalOrderId: order.externalOrderId }
+    await db.$transaction(async (tx) => {
+      if (await tx.affiliateOrder.findFirst({ where: { ...where, userId: { not: null } }, select: { id: true } }))
+        throw new BadRequestException('该订单已有返现用户，不能再手动分配')
+      const updated = await tx.affiliateOrder.updateMany({ where: { ...where, userId: null }, data: { userId, attribution: 'MANUAL' } })
+      if (!updated.count) throw new BadRequestException('该订单已有返现用户，不能再手动分配')
+      await tx.auditLog.create({
+        data: { actorId: req.actor!.id, action: '手动关联订单用户', targetId: order.externalOrderId, traceId: req.traceId!, diff: { from: null, to: userId } },
+      })
+    })
     return { data: { ok: true } }
   }
   @Patch('users/:id') async updateUser(

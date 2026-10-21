@@ -3,7 +3,7 @@ import { Banknote, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, Refresh
 import { api, type Row } from '../lib/api'
 import { amount, errorText, money, type Notify } from '../lib/format'
 import { statusLabel } from '../lib/labels'
-import { Alert, Avatar, Button, Card, CardBody, Chip, EmptyState, IconButton, Loading, Modal, Pagination, PlatformTag, confirm, Select, SplitButton, DatePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
+import { Alert, Avatar, Button, Card, CardBody, Chip, EmptyState, IconButton, Loading, Modal, Pagination, PlatformTag, confirm, Select, SplitButton, DateRangePicker, StatCard, StatusChip, TextArea, TextField } from '../ui'
 import { ConversionCard } from './Conversion'
 import { ProductCell } from './shared'
 
@@ -204,7 +204,7 @@ export function Records({ kind, notify, platform }: { kind: RecordKind; notify: 
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('')
-  const [date, setDate] = useState('')
+  const [range, setRange] = useState({ from: '', to: '' })
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Row | null>(null)
   const [sync, setSync] = useState<SyncState>(null)
@@ -224,7 +224,7 @@ export function Records({ kind, notify, platform }: { kind: RecordKind; notify: 
   useEffect(() => {
     void load()
   }, [load])
-  useEffect(() => setPage(1), [query, status, date])
+  useEffect(() => setPage(1), [query, status, range])
 
   // 订单页：轮询后台同步任务，完成后刷新列表
   useEffect(() => {
@@ -259,11 +259,12 @@ export function Records({ kind, notify, platform }: { kind: RecordKind; notify: 
       rows.filter(
         (r) =>
           (!status || r.status === status) &&
-          (!date || String(r.createdAt).startsWith(date)) &&
+          // 按日期区间筛选（含首尾两天），时间文本前 10 位为 YYYY-MM-DD
+          (!range.from || (String(r.createdAt).slice(0, 10) >= range.from && String(r.createdAt).slice(0, 10) <= range.to)) &&
           // 用户管理只按用户名检索
           (kind === 'users' ? String(r.name ?? '') : Object.values(r).join(' ')).toLowerCase().includes(query.trim().toLowerCase()),
       ),
-    [rows, status, date, query, kind],
+    [rows, status, range, query, kind],
   )
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const current = Math.min(page, pages)
@@ -281,11 +282,11 @@ export function Records({ kind, notify, platform }: { kind: RecordKind; notify: 
       setSyncing(false)
     }
   }
-  const filtering = !!(query || status || date)
+  const filtering = !!(query || status || range.from)
   const reset = () => {
     setQuery('')
     setStatus('')
-    setDate('')
+    setRange({ from: '', to: '' })
   }
 
   const sum = (s: string) => money(rows.filter((r) => r.status === s).reduce((a, r) => a + Number(r.amount), 0))
@@ -311,7 +312,7 @@ export function Records({ kind, notify, platform }: { kind: RecordKind; notify: 
           {kind !== 'rebates' && kind !== 'users' && (
             <Select dense aria-label="状态" value={status} onChange={setStatus} options={[['', '全部状态'], ...statuses.map((s): [string, string] => [s, statusLabel(s)])]} />
           )}
-          {kind !== 'users' && <DatePicker dense aria-label="日期" value={date} onChange={setDate} />}
+          {kind !== 'users' && <DateRangePicker dense aria-label="日期范围" value={range} onChange={setRange} className="toolbar-date" />}
           {filtering && <IconButton icon={X} label="清除筛选" onClick={reset} />}
           {kind === 'orders' && (
             <>
@@ -454,16 +455,21 @@ function RecordDetail({
   const patchUser = (body: object) => run(() => api(`/users/${row.id}`, { method: 'PATCH', body: JSON.stringify(body) }), '用户信息已更新')
 
   let footer = null
-  if (kind === 'orders')
+  // 只有没有归属的订单可以手动分配返现用户
+  const assignable = kind === 'orders' && !row.userId
+  if (assignable)
     footer = (
       <Button
         variant="primary"
         icon={Check}
         loading={busy}
-        disabled={owner === String(row.userId || '')}
-        onClick={() => run(() => api(`/orders/${row.id}/user`, { method: 'PATCH', body: JSON.stringify({ userId: owner || null }) }), owner ? '已关联返现用户' : '已取消关联')}
+        disabled={!owner}
+        onClick={async () => {
+          if (!(await confirm({ title: '分配返现用户', content: '分配后不能再修改或取消，确认把这笔订单分配给所选用户吗？' }))) return
+          await run(() => api(`/orders/${row.id}/user`, { method: 'PATCH', body: JSON.stringify({ userId: owner }) }), '已分配返现用户')
+        }}
       >
-        保存关联
+        分配
       </Button>
     )
   else if (kind === 'users')
@@ -528,13 +534,13 @@ function RecordDetail({
             ))}
           </dl>
         )}
-        {kind === 'orders' && (
+        {assignable && (
           <Select
             label="返现用户"
-            hint="联盟未回传用户标识时，可在这里手动关联；同一订单号的所有商品一起关联"
+            hint="订单没有归属时可手动分配，分配后不能修改；同一订单号的所有商品一起分配"
             value={owner}
             onChange={setOwner}
-            options={[['', '未关联'], ...users.map((u): [string, string] => [u.id, `${u.name}${u.externalId && String(u.externalId).toLowerCase() !== String(u.name).toLowerCase() ? `（${u.externalId}）` : ''}`])]}
+            options={[['', '请选择用户'], ...users.map((u): [string, string] => [u.id, `${u.name}${u.externalId && String(u.externalId).toLowerCase() !== String(u.name).toLowerCase() ? `（${u.externalId}）` : ''}`])]}
           />
         )}
         {kind === 'users' && (

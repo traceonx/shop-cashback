@@ -412,6 +412,17 @@
   background: var(--c-primary);
   color: #fff;
 }
+.calendar-day.is-in-range {
+  border-radius: var(--radius-sm);
+  background: rgba(var(--primary-rgb), 0.12);
+  color: var(--c-primary);
+}
+.calendar-hint {
+  padding-top: 6px;
+  color: var(--c-text-3);
+  font-size: 12px;
+  text-align: center;
+}
 .calendar-foot {
   display: flex;
   justify-content: space-between;
