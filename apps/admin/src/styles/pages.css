@@ -679,3 +679,69 @@
   color: var(--c-text-3);
   font-size: 12px;
 }
+
+/* ---------- 推广位管理 ---------- */
+.position-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.position-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface-2);
+}
+.position-tile.is-bound {
+  border-style: solid;
+  border-color: var(--c-border);
+  background: var(--c-surface);
+}
+.position-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.position-id {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.position-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  min-width: 0;
+}
+.position-user > div {
+  min-width: 0;
+}
+.position-user strong {
+  display: block;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.position-user small {
+  color: var(--c-text-3);
+  font-size: 12px;
+}
+.position-user.is-empty {
+  color: var(--c-text-3);
+  font-size: 13px;
+}
+@media (max-width: 720px) {
+  .position-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}

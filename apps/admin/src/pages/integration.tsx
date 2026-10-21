@@ -40,8 +40,10 @@ export function useIntegration(kind: IntegrationKind) {
     setNotice('')
     try {
       await task()
+      return true
     } catch (e) {
       setError(errorText(e))
+      return false
     }
   }
   const summary = useCallback(async () => {
@@ -54,14 +56,16 @@ export function useIntegration(kind: IntegrationKind) {
     await run(async () => fill(await api<IntegrationData>(`/integrations/${kind}/details`, { method: 'POST' })))
     setLoading(false)
   }
+  /** 保存配置，返回是否成功 */
   const save = async () => {
     setBusy(true)
-    await run(async () => {
+    const ok = await run(async () => {
       await api(`/integrations/${kind}`, { method: 'PUT', body: JSON.stringify(values) })
       fill(await api<IntegrationData>(`/integrations/${kind}/details`, { method: 'POST' }))
       setNotice('配置已保存')
     })
     setBusy(false)
+    return ok
   }
   const test = async () => {
     setBusy(true)
