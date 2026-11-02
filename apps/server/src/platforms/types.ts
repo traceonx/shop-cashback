@@ -57,6 +57,8 @@ export interface PlatformPlugin {
       price: number | null
       imageUrl: string | null
       commission: number | null
+      /** 百分比数值，例如 2.4 表示 2.4%，与返现比例不同。 */
+      commissionRate?: number | null
       coupon: number | null
       payablePrice?: number | null
       password?: string

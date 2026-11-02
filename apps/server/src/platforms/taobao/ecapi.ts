@@ -66,6 +66,7 @@ export function freeItemInfo(row: any, now = Date.now()) {
   }
   const rate = String(row?.max_commission_rate ?? '')
   let commission: number | null = null
+  const commissionRate = /^\d{1,3}(\.\d{1,6})?$/.test(rate) && Number(rate) <= 100 ? Number(rate) : null
   // 百分比保留六位小数，用整数运算向下取分；不把百分比当佣金金额。
   if (payablePrice !== null && /^\d{1,3}(\.\d{1,6})?$/.test(rate)) {
     const [whole, fraction = ''] = rate.split('.')
@@ -77,7 +78,7 @@ export function freeItemInfo(row: any, now = Date.now()) {
     title: sameItem && typeof item.title === 'string' ? item.title : null,
     image: image && /^https:\/\//.test(image) ? image : null,
     shop: sameItem && typeof item.nick === 'string' ? item.nick : null,
-    price, coupon, payablePrice, commission,
+    price, coupon, payablePrice, commission, commissionRate,
   }
 }
 
@@ -208,6 +209,7 @@ export async function tbHybridConvert(
       price: found ? found.price : p?.goods.price ?? null,
       imageUrl: found ? found.image : p?.goods.image ?? null,
       commission: found ? found.commission : p?.goods.commission ?? null,
+      commissionRate: found ? null : p?.goods.commissionRate ?? null,
       coupon: found ? found.coupon : p?.goods.coupon ?? null,
       payablePrice: found ? found.finalPrice : p?.goods.payablePrice ?? null,
       password: password || undefined,

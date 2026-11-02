@@ -69,15 +69,22 @@ export function webConversion(d: any, now = Date.now()): Awaited<ReturnType<Plat
   const link = couponLink || https(d.shortLinkurl || d.url)
   if (!link || !/(^|\.)(taobao\.com|tb\.cn|tmall\.com)$/.test(new URL(link).hostname))
     throw new WebError('FORMAT', '淘宝网页未返回有效推广链接')
-  const rate = Number(d.calTkRate)
-  // promotionPrice 的券前/券后口径尚未验证，保留展示值，不猜测计佣基数。
+  const rate = d.calTkRate == null || d.calTkRate === '' ? NaN : Number(d.calTkRate)
+  const commissionRate = Number.isFinite(rate) && rate >= 0 && rate <= 10000 ? rate / 100 : null
+  const price = decimalCents(d.promotionPrice)
+  // 按展示售价减去本次有效券预估，实际返现由订单结算校正。
+  const noCoupon = d.couponAmount == null || coupon === 0
+  const usableCoupon = validCoupon && couponLink ? coupon : noCoupon ? 0 : null
+  const payablePrice = price !== null && usableCoupon !== null && usableCoupon <= price ? price - usableCoupon : null
+  const commission = payablePrice !== null && commissionRate !== null
+    ? Number(BigInt(payablePrice) * BigInt(Math.round(rate * 1000000)) / 10000000000n) : null
   return { link, snapshot: {
     product: String(d.itemName || '淘宝商品'), sku: d.itemId == null ? undefined : String(d.itemId),
-    price: decimalCents(d.promotionPrice), imageUrl: https(d.pic), coupon: validCoupon ? coupon : null,
-    commission: null, payablePrice: null, rebate: null, finalPrice: null,
+    price, imageUrl: https(d.pic), coupon: usableCoupon,
+    commission, commissionRate, payablePrice, rebate: null, finalPrice: null,
     password: couponLink ? d.couponLinkTaoToken || undefined : d.taoToken || undefined,
     shop: d.shopTitle || undefined, category: '淘宝商品', trackingVerified: false,
-    infoMessage: `淘宝联盟网页备用通道${Number.isFinite(rate) && rate >= 0 ? `；佣金率 ${rate / 100}%` : ''}；价格及计佣基数待核实，返现金额以订单为准`,
+    infoMessage: commission !== null ? '按当前售价、有效优惠券和佣金率预估，实际返现以订单结算为准' : '商品金额或佣金信息不完整，预计返现待确认',
   } }
 }
 export function webOrder(raw: Record<string, unknown>) {

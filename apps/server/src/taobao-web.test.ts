@@ -28,7 +28,7 @@ test('失效事件：首次未登录不提醒；连续失效一次；恢复后�
   applyWebResult(s, 'EXPIRED', 8, 'h')
   assert.equal(s.incident, 'h'); assert.equal(s.notified, false)
 })
-test('转链：佣金率单位正确，价格不重复减券，不猜返现金额', () => {
+test('网页转链：按有效券后价与佣金率预估佣金，缺失信息保留待确认', () => {
   const r = webConversion({
     itemId: '716309468486', itemName: '口红', promotionPrice: '93', calTkRate: 9.6e2,
     shortLinkurl: 'https://s.click.taobao.com/regular', taoToken: 'regular',
@@ -37,10 +37,18 @@ test('转链：佣金率单位正确，价格不重复减券，不猜返现金�
   }, 500)
   assert.equal(r.link, 'https://s.click.taobao.com/coupon')
   assert.equal(r.snapshot.password, 'coupon'); assert.equal(r.snapshot.price, 9300); assert.equal(r.snapshot.coupon, 3900)
-  assert.equal(r.snapshot.payablePrice, null); assert.equal(r.snapshot.commission, null)
-  assert.match(r.snapshot.infoMessage!, /9.6%/)
+  assert.equal(r.snapshot.payablePrice, 5400); assert.equal(r.snapshot.commission, 518)
+  assert.equal(r.snapshot.commissionRate, 9.6)
   const noCoupon = webConversion({ shortLinkurl: 'https://s.click.taobao.com/regular', calTkRate: 270 })
-  assert.equal(noCoupon.snapshot.coupon, null); assert.match(noCoupon.snapshot.infoMessage!, /2.7%/)
+  assert.equal(noCoupon.snapshot.coupon, 0); assert.equal(noCoupon.snapshot.commissionRate, 2.7)
+  const jeans = webConversion({ shortLinkurl: 'https://s.click.taobao.com/regular', promotionPrice: '470', calTkRate: 240 })
+  assert.equal(jeans.snapshot.payablePrice, 47000)
+  assert.equal(jeans.snapshot.commission, 1128)
+  const expired = webConversion({ shortLinkurl: 'https://s.click.taobao.com/regular', promotionPrice: '100', calTkRate: 240, couponAmount: 20, couponEffectiveEndTime: '1' })
+  assert.equal(expired.snapshot.commission, null)
+  assert.equal(webConversion({ shortLinkurl: 'https://s.click.taobao.com/regular', promotionPrice: '470' }).snapshot.commission, null)
+  assert.equal(webConversion({ shortLinkurl: 'https://s.click.taobao.com/regular', calTkRate: 240 }).snapshot.commissionRate, 2.4)
+  assert.equal(webConversion({ shortLinkurl: 'https://s.click.taobao.com/regular' }).snapshot.commissionRate, null)
 })
 test('网页订单：长整数不丢精度，推广位映射，与官方去重主键一致', () => {
   const r = webResponse(200, '{"success":true,"data":{"result":[{"tradeParentId":2938475610293847561,"tradeId":2938475610293847562,"adzoneId":116331050369,"tkCreateTime":"2026-10-20 12:00:00","alipayTotalPrice":"8","pubSharePreFee":"0.21","tkStatus":12}]}}')
