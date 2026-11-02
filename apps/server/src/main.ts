@@ -50,7 +50,7 @@ import { startAutoSync } from './auto-sync'
 import { platform, listPlatforms } from './platforms/registry'
 import { integrationStatus, saveConfig, testConnection, readConfig, isThirdParty, type Provider } from './integrations'
 import { webStatus, disconnectWeb, webProbe, webMaintenance } from './platforms/taobao/web'
-import { startBrowserLogin, cancelBrowserLogin, browserLoginStatus, browserLoginScreenshot, browserLoginClick } from './platforms/taobao/web-browser'
+import { startBrowserLogin, cancelBrowserLogin, browserLoginStatus, browserLoginScreenshot, browserLoginClick, browserLoginDrag, verifyBrowserLogin } from './platforms/taobao/web-browser'
 import { decryptCallback, receiveCallback, processInbox } from './wecom'
 import { version as appVersion, versionText } from './version'
 import { updateStatus, startUpdate, setAutoUpdate, autoUpdateTick } from './update'
@@ -379,6 +379,11 @@ class AdminController {
   }
   @Post('integrations/taobao/web/login/click') async taobaoWebLoginClick(@Body() body: { x?: unknown; y?: unknown }) {
     await browserLoginClick(body.x, body.y)
+    return { data: { ok: true } }
+  }
+  @Post('integrations/taobao/web/login/verify') async taobaoWebLoginVerify() { return { data: await verifyBrowserLogin() } }
+  @Post('integrations/taobao/web/login/drag') async taobaoWebLoginDrag(@Body() body: { points?: unknown }) {
+    await browserLoginDrag(body.points)
     return { data: { ok: true } }
   }
   @Delete('integrations/taobao/web/login') async taobaoWebLoginCancel() { return { data: await cancelBrowserLogin() } }

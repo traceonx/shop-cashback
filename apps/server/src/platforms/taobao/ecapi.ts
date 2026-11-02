@@ -99,7 +99,24 @@ async function promote(t: PlatformConfig, official: PlatformConfig, material: st
     throw new BadRequestException('喵有券未返回有效的淘宝推广链接')
   const newId = isNewId(row.item_id) ? String(row.item_id) : null
   const tpwd = typeof row.tpwd === 'string' ? row.tpwd : null
-  return { url, tpwd, fullTpwd: tpwd, newId, goods: freeItemInfo(row) }
+  let goods = freeItemInfo(row)
+  // 部分免费转链响应不包含 item_info，再用免费物料查询补充。
+  // 只按转链实际返回的商品 ID 匹配，不按标题或单条搜索结果认领商品。
+  if (goods.price === null && row.item_id != null) {
+    try {
+      const result = await ecapiCall('taoke/getTkMaterialItem', {
+        ...auth(t, official), keyword: url, pagesize: '20', pageno: '1',
+      })
+      const rows = Array.isArray(result) ? result : Array.isArray(result?.data) ? result.data : []
+      const exact = rows.filter((v: any) => v?.item_id != null && String(v.item_id) === String(row.item_id))
+      if (exact.length === 1) {
+        const v = exact[0]
+        // 保留转链接口的券与佣金口径，查询结果只补同一商品的基础信息。
+        goods = freeItemInfo({ ...row, item_info: { ...v, num_iid: row.item_id, nick: v.shop_title } })
+      }
+    } catch { /* 补充信息失败不阻止已经成功的转链 */ }
+  }
+  return { url, tpwd, fullTpwd: tpwd, newId, goods }
 }
 
 /** 步骤 3：官方物料搜索按新版 ID 精确命中 */
@@ -208,6 +225,6 @@ export async function tbEcapiTest(t: PlatformConfig) {
   const { readConfig } = await import('../../integrations')
   const c = await readConfig('taobao')
   if (!c.pid) throw new BadRequestException('请先保存淘宝联盟默认 PID')
-  await ecapiCall('taoke/getTkMaterialItem', { ...auth(t, c), q: '眼镜', pageno: '1', pagesize: '1' })
+  await ecapiCall('taoke/getTkMaterialItem', { ...auth(t, c), keyword: '眼镜', pageno: '1', pagesize: '1' })
   return '喵有券免费商品查询接口可用；淘宝转链仅使用免费淘口令 / 商品 ID 接口，订单请使用官方或网页登录通道。'
 }

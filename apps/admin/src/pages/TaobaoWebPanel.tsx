@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Modal, Select, TextField, confirm } from '../ui'
 import { api } from '../lib/api'
 import { dateTime, errorText } from '../lib/format'
@@ -8,6 +8,7 @@ type Status = { state: string; lastValid: number | null; expiredAt: number | nul
 type Login = { state: string; message: string; screenshot?: string | null; width: number; height: number }
 const states: Record<string, string> = { NONE: '尚未连接', PENDING: '待验证', ACTIVE: '登录有效', EXPIRED: '登录已失效', VERIFY: '需要人工验证', LIMITED: '请求限流', NETWORK: '网络异常' }
 export function TaobaoWebPanel({ it }: { it: ReturnType<typeof useIntegration> }) {
+  const gesture = useRef<{ x: number; y: number }[]>([])
   const [status, setStatus] = useState<Status | null>(null)
   const [login, setLogin] = useState<Login | null>(null)
   const [notice, setNotice] = useState('')
@@ -79,13 +80,28 @@ export function TaobaoWebPanel({ it }: { it: ReturnType<typeof useIntegration> }
     })}>关闭登录窗口</Button>}>
       <div className="stack">
         <Alert tone={login.state === 'ERROR' ? 'error' : 'info'}>{login.message || '正在准备登录页面…'}</Alert>
-        <small>请使用与默认 PID 对应的淘宝联盟账号。可直接点击下方官方页面切换二维码或刷新；本机运行时也可操作自动打开的浏览器窗口。</small>
-        {login.screenshot && <button type="button" className="taobao-login-screen" aria-label="操作淘宝官方登录页面" onClick={e => {
-          const rect = e.currentTarget.getBoundingClientRect()
-          const x = Math.floor((e.clientX - rect.left) / rect.width * login.width)
-          const y = Math.floor((e.clientY - rect.top) / rect.height * login.height)
-          void api('/integrations/taobao/web/login/click', { method: 'POST', body: JSON.stringify({ x, y }) }).catch(e => setError(errorText(e)))
-        }}><img src={`data:image/jpeg;base64,${login.screenshot}`} alt="淘宝联盟官方登录页面，使用手机淘宝扫描二维码" /></button>}
+        <small>请使用与默认 PID 对应的淘宝联盟账号。下方官方画面支持点击和手动拖动。扫码后请在手机确认授权，并在页面完成必要的人工验证；本机运行时也可操作自动打开的浏览器窗口。</small>
+        {login.screenshot && <button type="button" className="taobao-login-screen" aria-label="操作淘宝官方登录页面" onPointerDown={e => {
+          e.preventDefault()
+          e.currentTarget.setPointerCapture(e.pointerId)
+          const r = e.currentTarget.getBoundingClientRect()
+          gesture.current = [{ x: Math.max(0, Math.min(login.width - 1, Math.floor((e.clientX - r.left) / r.width * login.width))), y: Math.max(0, Math.min(login.height - 1, Math.floor((e.clientY - r.top) / r.height * login.height))) }]
+        }} onPointerMove={e => {
+          if (!gesture.current.length || gesture.current.length >= 99) return
+          const r = e.currentTarget.getBoundingClientRect()
+          gesture.current.push({ x: Math.max(0, Math.min(login.width - 1, Math.floor((e.clientX - r.left) / r.width * login.width))), y: Math.max(0, Math.min(login.height - 1, Math.floor((e.clientY - r.top) / r.height * login.height))) })
+        }} onPointerCancel={() => { gesture.current = [] }} onPointerUp={() => {
+          const points = gesture.current
+          gesture.current = []
+          if (!points.length) return
+          const first = points[0]
+          const dragged = points.some(p => Math.abs(p.x - first.x) + Math.abs(p.y - first.y) > 6)
+          void api('/integrations/taobao/web/login/' + (dragged ? 'drag' : 'click'), { method: 'POST', body: JSON.stringify(dragged ? { points } : first) }).catch(e => setError(errorText(e)))
+        }}><img draggable={false} src={`data:image/jpeg;base64,${login.screenshot}`} alt="淘宝联盟官方登录页面，使用手机淘宝扫描二维码" /></button>}
+        <Button disabled={busy || login.state === 'OPENING' || login.state === 'VERIFYING'} onClick={() => void action(async () => {
+          const r = await api<Login>('/integrations/taobao/web/login/verify', { method: 'POST' })
+          if (r.state === 'CONNECTED') { setLogin(null); setNotice('淘宝联盟登录成功，已连接。') } else setLogin(r)
+        })}>已完成登录，验证连接</Button>
         {error && <Alert tone="error">{error}</Alert>}
       </div>
     </Modal>}

@@ -29,14 +29,14 @@ export function webResponse(status: number, text: string, location = ''): any {
   if (status >= 500) throw new WebError('NETWORK', '淘宝联盟网页服务暂不可用')
   let r: any
   try { r = parseJdJson(text) } catch {
-    if (/captcha|punish|验证码|滑块/i.test(text)) throw new WebError('VERIFY', '淘宝联盟需要人工验证')
+    if (/captcha|punish|验证码|滑块|风控|访问受限|访问被拒绝/i.test(text)) throw new WebError('VERIFY', '淘宝联盟需要人工验证')
     throw new WebError('FORMAT', '淘宝网页返回格式异常，请人工检查登录状态')
   }
   const code = [r?.bizErrorCode, r?.resultCode, r?.code, r?.message, r?.msg, r?.errorMsg, r?.bizErrorDesc]
     .filter(v => typeof v === 'string' || typeof v === 'number').join(' ')
   if (/NOT_LOGIN|SESSION_EXPIRED|SESSION_TIMEOUT|LOGIN_REQUIRED|未登录|请.{0,4}登录|登录.{0,5}(失效|过期)/i.test(code))
     throw new WebError('EXPIRED', '淘宝联盟网页登录已失效')
-  if (/RGV|CAPTCHA|VERIFY|USER_VALIDATE|验证码|滑块/i.test(code)) throw new WebError('VERIFY', '淘宝联盟需要人工验证')
+  if (/RGV|CAPTCHA|VERIFY|USER_VALIDATE|验证码|滑块|风控|访问受限|访问被拒绝/i.test(code)) throw new WebError('VERIFY', '淘宝联盟需要人工验证')
   if (/LIMIT|FREQUENCY|频繁|限流|限频/i.test(code)) throw new WebError('LIMITED', '淘宝联盟网页请求限流')
   if (status < 200 || status >= 300 || r?.success !== true || !r.data)
     throw new WebError('BUSINESS', '淘宝网页未返回成功结果（可能无推广资格或页面接口已变化）')

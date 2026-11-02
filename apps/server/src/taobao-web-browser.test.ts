@@ -1,7 +1,37 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { chromium } from 'playwright-core'
-import { browserLoginStatus, cancelBrowserLogin, startBrowserLogin, browserLoginScreenshot } from './platforms/taobao/web-browser'
+import { browserLoginStatus, cancelBrowserLogin, startBrowserLogin, browserLoginScreenshot, verifyBrowserLogin, browserLoginDrag } from './platforms/taobao/web-browser'
+import { WebError } from './platforms/taobao/web-core'
+
+test('匿名 token 不查订单；人工验证失败后暂停，冷却期内不再次请求', async t => {
+  t.mock.method(require('./integrations'), 'readConfig', async () => ({ pid: 'mm_123_456_7890' }))
+  let attempts = 0
+  const moves: string[] = []
+  const page = { goto: async () => undefined, url: () => 'https://pub.alimama.com/', evaluate: async () => 'UA',
+    mouse: { move: async (x: number, y: number) => { moves.push(x + ',' + y) }, down: async () => { moves.push('down') }, up: async () => { moves.push('up') } } }
+
+  const context = { pages: () => [page], route: async () => undefined, on: () => undefined,
+    cookies: async () => [{ name: '_tb_token_', value: 'anonymous' }], close: async () => undefined }
+  t.mock.method(chromium, 'launchPersistentContext', async () => context as any)
+  t.mock.method(require('./platforms/taobao/web'), 'connectWebLogin', async () => {
+    attempts++; throw new WebError('VERIFY', '需要人工验证')
+  })
+  t.after(cancelBrowserLogin)
+  await startBrowserLogin()
+  for (let i = 0; i < 50 && browserLoginStatus().state === 'OPENING'; i++) await new Promise(r => setTimeout(r, 5))
+  assert.equal(attempts, 0)
+  await browserLoginDrag([{ x: 10, y: 20 }, { x: 30, y: 20 }])
+  assert.deepEqual(moves, ['10,20', 'down', '30,20', 'up'])
+  assert.equal(browserLoginStatus().state, 'WAITING')
+  await verifyBrowserLogin()
+  assert.equal(attempts, 1)
+  assert.equal((browserLoginStatus() as any).paused, true)
+  assert.match(browserLoginStatus().message, /已暂停自动请求/)
+  await assert.rejects(verifyBrowserLogin(), /一分钟/)
+  assert.equal(attempts, 1)
+  await assert.rejects(browserLoginDrag([{ x: 0, y: 0 }, { x: Infinity, y: 1 }]), /拖动位置无效/)
+})
 
 test('点击登录启动独立浏览器，登录成功自动验证保存并关闭；无需配对码', async t => {
   t.mock.method(require('./integrations'), 'readConfig', async () => ({ pid: 'mm_123_456_7890' }))
@@ -12,7 +42,7 @@ test('点击登录启动独立浏览器，登录成功自动验证保存并关�
   }
   const context = {
     pages: () => [page], route: async () => undefined, on: () => undefined,
-    cookies: async () => [{ name: '_tb_token_', value: 'test-cookie', domain: '.alimama.com', path: '/' }],
+    cookies: async () => [{ name: '_tb_token_', value: 'test-cookie', domain: '.alimama.com', path: '/' }, { name: 'login', value: 'true', domain: '.alimama.com', path: '/' }],
     close: async () => { closed++ },
   }
   t.mock.method(chromium, 'launchPersistentContext', async (profile: string, options: any) => {

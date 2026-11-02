@@ -13,6 +13,7 @@ type Login = {
   id: string; state: 'OPENING' | 'WAITING' | 'VERIFYING' | 'CONNECTED' | 'ERROR' | 'CANCELLED';
   message: string; expiresAt: number; context?: BrowserContext; page?: Page;
   timer?: NodeJS.Timeout; expires?: NodeJS.Timeout; checking?: boolean;
+  paused?: boolean; nextCheckAt?: number;
 }
 let current: Login | undefined
 const active = (login: Login) => current === login && !['CANCELLED', 'ERROR', 'CONNECTED'].includes(login.state)
@@ -23,7 +24,7 @@ async function close(login: Login) {
 }
 export function browserLoginStatus() {
   if (!current) return { state: 'IDLE', message: '', expiresAt: null, width: WIDTH, height: HEIGHT }
-  return { state: current.state, message: current.message, expiresAt: current.expiresAt, width: WIDTH, height: HEIGHT }
+  return { state: current.state, message: current.message, paused: !!current.paused, expiresAt: current.expiresAt, width: WIDTH, height: HEIGHT }
 }
 export async function cancelBrowserLogin() {
   if (current) { current.state = 'CANCELLED'; current.message = '登录已取消'; await close(current) }
@@ -91,14 +92,17 @@ async function launch(login: Login) {
     await close(login)
   }
 }
-async function check(login: Login) {
+async function check(login: Login, manual = false) {
   if (!active(login) || !login.context || !login.page || login.checking) return
+  if (!manual && (login.paused || Date.now() < (login.nextCheckAt || 0))) return
   // 未回到联盟网站前，不拿未登录 Cookie 请求订单。
   if (new URL(login.page.url()).hostname !== 'pub.alimama.com') return
   login.checking = true
   try {
     const cookies = await login.context.cookies('https://pub.alimama.com/openapi/param2/1/gateway.unionpub/report.getTbkOrderDetails.json')
     if (!cookies.some(c => c.name === '_tb_token_')) return
+    // 匿名页面也会生成 CSRF token，不能以此作为登录成功的依据。
+    if (!manual && !cookies.some(c => c.name === 'login' && c.value === 'true')) return
     const userAgent = await login.page.evaluate(() => navigator.userAgent)
     login.state = 'VERIFYING'; login.message = '正在验证淘宝联盟会话…'
     await connectWebLogin(cookies, userAgent, () => active(login))
@@ -108,8 +112,20 @@ async function check(login: Login) {
   } catch (e) {
     if (!active(login)) return
     login.state = 'WAITING'
-    login.message = e instanceof WebError ? `${e.message}。请在官方页面完成登录或验证，系统会自动重试。` : '尚未完成连接，请在官方页面确认登录后稍候。'
+    login.paused = true
+    login.nextCheckAt = Date.now() + 60000
+    login.message = (e instanceof WebError ? e.message : '会话验证未完成') + '。已暂停自动请求，请在官方页面完成登录或人工验证，再点击“已完成登录，验证连接”。'
   } finally { login.checking = false }
+}
+export async function verifyBrowserLogin() {
+  const login = current
+  if (!login || !active(login)) throw new BadRequestException('请先打开登录页面')
+  if (Date.now() < (login.nextCheckAt || 0)) throw new BadRequestException('请稍候一分钟再验证，避免重复请求')
+  if (!login.page || new URL(login.page.url()).hostname !== 'pub.alimama.com')
+    throw new BadRequestException('请先在官方页面完成登录并返回淘宝联盟')
+  login.nextCheckAt = Date.now() + 60000
+  await check(login, true)
+  return browserLoginStatus()
 }
 export async function browserLoginScreenshot() {
   if (!current || !active(current) || !current.page) return null
@@ -121,4 +137,17 @@ export async function browserLoginClick(x: unknown, y: unknown) {
     x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT) throw new BadRequestException('点击位置无效')
   if (!current || !active(current) || !current.page) throw new BadRequestException('请先打开登录页面')
   await current.page.mouse.click(x, y)
+}
+
+/** 只转发管理员在登录画面上的实际拖动，不识别或自动求解验证码。 */
+export async function browserLoginDrag(points: unknown) {
+  if (!Array.isArray(points) || points.length < 2 || points.length > 100 || points.some(p =>
+    !p || typeof p.x !== 'number' || typeof p.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
+    p.x < 0 || p.y < 0 || p.x >= WIDTH || p.y >= HEIGHT)) throw new BadRequestException('拖动位置无效')
+  const page = current?.page
+  if (!current || !active(current) || !page) throw new BadRequestException('请先打开登录页面')
+  await page.mouse.move(points[0].x, points[0].y)
+  await page.mouse.down()
+  try { for (const p of points.slice(1)) await page.mouse.move(p.x, p.y) }
+  finally { await page.mouse.up() }
 }

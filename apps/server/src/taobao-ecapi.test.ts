@@ -20,6 +20,27 @@ test('免费返回的售价、图片、券门槛和佣金率映射为金额；�
 })
 import { ecapiCall } from './platforms/jd/ecapi'
 
+test('转链缺少商品信息时用免费查询精确补价，不使用同名其他商品', async t => {
+  clearTbIdCache()
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const u = new URL(String(input))
+    if (u.hostname === 'c.tb.cn') return new Response('普通页面')
+    if (u.pathname.endsWith('doItemHighCommissionPromotionLinkByTpwd'))
+      return new Response(JSON.stringify({ code: 200, data: { item_id: '123456', short_url: 'https://s.click.taobao.com/free', tpwd: '￥FREE￥', has_coupon: false, max_commission_rate: '2' } }))
+    assert.equal(u.pathname, '/taoke/getTkMaterialItem')
+    assert.equal(u.searchParams.get('keyword'), 'https://s.click.taobao.com/free')
+    return new Response(JSON.stringify({ code: 200, data: [
+      { item_id: '999999', zk_final_price: '999', title: '同名商品' },
+      { item_id: '123456', zk_final_price: '123', title: '原商品', pict_url: '//img.alicdn.com/a.jpg' },
+    ] }))
+  })
+  const link = 'https://c.tb.cn/h.test?tk=abcdefg'
+  const result = await tbHybridConvert(official, third, link, link)
+  assert.equal(result.snapshot.product, '原商品')
+  assert.equal(result.snapshot.price, 12300)
+  assert.equal(result.snapshot.commission, 246)
+})
+
 test('付费接口在发出网络请求之前被阻止', async t => {
   t.mock.method(globalThis, 'fetch', async () => assert.fail('不应发出付费请求'))
   for (const method of ['doTbHighCommissionPromotionUrl', 'doCommonPromotionUrlParse', 'tbkOrderDetailsGet', 'adzoneCreate', 'getTbAuthList']) {
@@ -69,7 +90,7 @@ function mock(officialRows: unknown[], spreadOk = true) {
       assert.equal(u.searchParams.get('pid'), 'mm_1_2_621564417')
       assert.equal(u.pathname, '/taoke/doItemHighCommissionPromotionLink')
       assert.equal(u.searchParams.get('itemid'), '1020524973653')
-      return new Response(JSON.stringify({ code: 200, data: { item_id: 'oQa8pyahrt-NEWID', short_url: 'https://s.click.taobao.com/ecapi', tpwd: '￥ECAPI￥' } }))
+      return new Response(JSON.stringify({ code: 200, data: { item_info: { zk_final_price: '1138' }, item_id: 'oQa8pyahrt-NEWID', short_url: 'https://s.click.taobao.com/ecapi', tpwd: '￥ECAPI￥' } }))
     }
     const p = init!.body as URLSearchParams
     calls.push(p.get('method')!)
