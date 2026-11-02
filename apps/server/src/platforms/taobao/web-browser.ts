@@ -105,10 +105,11 @@ async function check(login: Login, manual = false) {
     if (!manual && !cookies.some(c => c.name === 'login' && c.value === 'true')) return
     const userAgent = await login.page.evaluate(() => navigator.userAgent)
     login.state = 'VERIFYING'; login.message = '正在验证淘宝联盟会话…'
-    await connectWebLogin(cookies, userAgent, () => active(login))
+    await connectWebLogin(cookies, userAgent, () => active(login), 'browser')
     if (!active(login)) return
     login.state = 'CONNECTED'; login.message = '淘宝联盟登录成功，已连接。'
-    await close(login)
+    // 后续请求继续使用扫码的浏览器会话，保留自动更新的 Cookie。
+    clearInterval(login.timer); clearTimeout(login.expires)
   } catch (e) {
     if (!active(login)) return
     login.state = 'WAITING'
@@ -126,6 +127,30 @@ export async function verifyBrowserLogin() {
   login.nextCheckAt = Date.now() + 60000
   await check(login, true)
   return browserLoginStatus()
+}
+
+/** 固定联盟域名与接口；在原登录页面发出同源请求，不导出 Cookie。 */
+export async function browserWebRequest(endpoint: string, query: string) {
+  const page = current?.page
+  if (!page || page.isClosed() || !current?.context || !['WAITING', 'VERIFYING', 'CONNECTED'].includes(current.state))
+    throw new WebError('VERIFY', '网页登录浏览器未连接，请重新打开登录页面')
+  if (new URL(page.url()).hostname !== 'pub.alimama.com')
+    throw new WebError('VERIFY', '请在浏览器完成官方登录或验证，并返回淘宝联盟')
+  if (!['report.getTbkOrderDetails', 'xt.entry'].includes(endpoint)) throw new BadRequestException('网页接口无效')
+  const params = new URLSearchParams(query)
+  const cookies = await current.context.cookies('https://pub.alimama.com/openapi/param2/1/gateway.unionpub/')
+  const csrf = cookies.filter(c => c.name === '_tb_token_').sort((a, b) => b.path.length - a.path.length)[0]
+  if (!csrf) throw new WebError('EXPIRED', '浏览器中的淘宝联盟会话已失效')
+  params.set('_tb_token_', csrf.value)
+  try {
+    return await page.evaluate(async ({ endpoint, query }) => {
+      const response = await fetch('/openapi/param2/1/gateway.unionpub/' + endpoint + '.json?' + query, {
+        credentials: 'include', headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        signal: AbortSignal.timeout(20000),
+      })
+      return { status: response.status, text: await response.text(), location: response.redirected ? response.url : '' }
+    }, { endpoint, query: params.toString() })
+  } catch { throw new WebError('NETWORK', '浏览器内联盟请求失败或超时，请查看官方页面') }
 }
 export async function browserLoginScreenshot() {
   if (!current || !active(current) || !current.page) return null

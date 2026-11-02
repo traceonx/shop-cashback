@@ -13,7 +13,7 @@ type State = {
   incident?: string; notified?: boolean; attempts?: number; retryAt?: number;
   nextAt?: number; lease?: string; leaseUntil?: number;
   lastProbe?: number; account?: string;
-  userAgent?: string; lastError?: string; connecting?: string;
+  transport?: 'http' | 'browser'; userAgent?: string; lastError?: string; connecting?: string;
 }
 // 所有实例共享数据库锁、请求间隔与租约；请求期间不占数据库事务。
 async function mutate<T>(fn: (s: State) => Promise<T> | T): Promise<T> {
@@ -35,7 +35,7 @@ export async function webStatus() {
   }))
 }
 /** 仅由服务端独立浏览器调用，不提供客户端导入 Cookie 的公开接口。验证通过后再替换旧会话。 */
-export async function connectWebLogin(cookies: unknown, userAgent: string, stillCurrent: () => boolean = () => true) {
+export async function connectWebLogin(cookies: unknown, userAgent: string, stillCurrent: () => boolean = () => true, transport: 'http' | 'browser' = 'http') {
   const cookie = validateCookies(cookies)
   if (!userAgent || userAgent.length > 512 || /[\r\n]/.test(userAgent)) throw new BadRequestException('浏览器标识无效')
   const c = await readConfig('taobao')
@@ -45,12 +45,12 @@ export async function connectWebLogin(cookies: unknown, userAgent: string, still
   await mutate(s => { s.connecting = connecting })
   try {
     const d = day(new Date())
-    await requestWeb('report.getTbkOrderDetails', orderParams(d, d), true, { cookie, userAgent })
+    await requestWeb('report.getTbkOrderDetails', orderParams(d, d), true, { cookie, userAgent, transport })
     const latest = await readConfig('taobao')
     if (account !== /^mm_(\d+)_/.exec(latest.pid || '')?.[1]) throw new WebError('VERIFY', '登录期间 PID 账号已变更，请重新登录')
     await mutate(s => {
       if (s.connecting !== connecting || !stillCurrent()) throw new BadRequestException('登录已取消，请重新登录')
-      Object.assign(s, { cookie, userAgent, account, generation: randomUUID(), connecting: undefined, lastError: undefined })
+      Object.assign(s, { cookie, userAgent, transport, account, generation: randomUUID(), connecting: undefined, lastError: undefined })
       applyWebResult(s, undefined, Date.now(), '')
     })
   } catch (e) {
@@ -69,12 +69,12 @@ export async function disconnectWeb() {
 }
 export function webMode(c: PlatformConfig) { return c.webMode || 'off' }
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
-async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', params: Record<string, string>, verify = false, candidate?: { cookie: string; userAgent: string }) {
+async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', params: Record<string, string>, verify = false, candidate?: { cookie: string; userAgent: string; transport: 'http' | 'browser' }) {
   const c = await readConfig('taobao')
   if (webMode(c) === 'off' && !verify) throw new WebError('NONE', '淘宝网页备用通道未启用')
   const rpm = Math.min(20, Math.max(1, Number(c.webRpm) || 20))
   const deadline = Date.now() + Math.max(35000, Math.ceil(60000 / rpm) + 5000)
-  let ticket: { cookie: string; lease: string; generation: string; userAgent: string } | null = null
+  let ticket: { cookie: string; lease: string; generation: string; userAgent: string; transport?: 'http' | 'browser' } | null = null
   while (!ticket && Date.now() < deadline) {
     ticket = await mutate(s => {
       if (!candidate && (!s.cookie || !s.generation || (!verify && ['NONE', 'PENDING', 'EXPIRED', 'VERIFY'].includes(s.state))))
@@ -83,7 +83,7 @@ async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', pa
       const now = Date.now()
       if ((s.nextAt || 0) > now || (s.leaseUntil || 0) > now) return null
       s.lease = randomUUID(); s.leaseUntil = now + 30000; s.nextAt = now + Math.ceil(60000 / rpm)
-      return { cookie: candidate?.cookie || s.cookie!, lease: s.lease, generation: s.generation || '',
+      return { transport: candidate?.transport || s.transport, cookie: candidate?.cookie || s.cookie!, lease: s.lease, generation: s.generation || '',
         userAgent: candidate?.userAgent || s.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' }
     })
     if (!ticket) await wait(300)
@@ -94,6 +94,11 @@ async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', pa
     const token = /(?:^|; )_tb_token_=([^;]+)/.exec(ticket.cookie)?.[1]
     if (!token) throw new WebError('EXPIRED', '淘宝网页登录凭证缺失')
     const q = new URLSearchParams({ ...params, t: String(Date.now()), _tb_token_: token })
+    let result: { status: number; text: string; location: string }
+    if (ticket.transport === 'browser') {
+      const { browserWebRequest } = await import('./web-browser')
+      result = await browserWebRequest(endpoint, q.toString())
+    } else {
     const r = await fetch(`https://pub.alimama.com/openapi/param2/1/gateway.unionpub/${endpoint}.json?${q}`, {
       headers: { Cookie: ticket.cookie, Accept: 'application/json', 'bx-v': '2.5.11',
         'X-Requested-With': 'XMLHttpRequest',
@@ -101,7 +106,9 @@ async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', pa
         'User-Agent': ticket.userAgent },
       redirect: 'manual', signal: AbortSignal.timeout(20000),
     })
-    const d = webResponse(r.status, await r.text(), r.headers.get('location') || '')
+      result = { status: r.status, text: await r.text(), location: r.headers.get('location') || '' }
+    }
+    const d = webResponse(result.status, result.text, result.location)
     if (endpoint === 'report.getTbkOrderDetails') {
       if (!Array.isArray(d.result)) throw new WebError('FORMAT', '订单列表格式异常，已停止同步')
       // 有订单时核对联盟账号；空订单无法证明身份，不据此强行认领任何订单。

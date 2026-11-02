@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { chromium } from 'playwright-core'
-import { browserLoginStatus, cancelBrowserLogin, startBrowserLogin, browserLoginScreenshot, verifyBrowserLogin, browserLoginDrag } from './platforms/taobao/web-browser'
+import { browserLoginStatus, cancelBrowserLogin, startBrowserLogin, browserLoginScreenshot, verifyBrowserLogin, browserLoginDrag, browserWebRequest } from './platforms/taobao/web-browser'
 import { WebError } from './platforms/taobao/web-core'
 
 test('匿名 token 不查订单；人工验证失败后暂停，冷却期内不再次请求', async t => {
@@ -37,8 +37,14 @@ test('点击登录启动独立浏览器，登录成功自动验证保存并关�
   t.mock.method(require('./integrations'), 'readConfig', async () => ({ pid: 'mm_123_456_7890' }))
   let closed = 0, connects = 0
   const page = {
+    isClosed: () => false,
     goto: async () => undefined, url: () => 'https://pub.alimama.com/portal/v2/effect/order/overviewOrder/page/index.htm',
-    evaluate: async () => 'BrowserFromTest', screenshot: async () => Buffer.from('test-image'),
+    evaluate: async (_fn: unknown, args?: { endpoint: string; query: string }) => {
+      if (!args) return 'BrowserFromTest'
+      assert.equal(args.endpoint, 'xt.entry')
+      assert.equal(new URLSearchParams(args.query).get('_tb_token_'), 'test-cookie')
+      return { status: 200, text: '{"success":true,"data":{}}', location: '' }
+    }, screenshot: async () => Buffer.from('test-image'),
   }
   const context = {
     pages: () => [page], route: async () => undefined, on: () => undefined,
@@ -63,8 +69,12 @@ test('点击登录启动独立浏览器，登录成功自动验证保存并关�
   for (let i = 0; i < 50 && browserLoginStatus().state !== 'CONNECTED'; i++) await new Promise(r => setTimeout(r, 10))
   assert.equal(browserLoginStatus().state, 'CONNECTED')
   assert.equal(connects, 1)
-  assert.equal(closed, 1)
+  assert.equal(closed, 0) // 验证成功后保留浏览器，复用同一会话。
+  assert.equal((await browserWebRequest('xt.entry', '_tb_token_=stale')).status, 200)
+  await assert.rejects(browserWebRequest('other.endpoint', ''), /网页接口无效/)
   assert.equal(await browserLoginScreenshot(), null)
+  await cancelBrowserLogin()
+  assert.equal(closed, 1)
 })
 
 test('浏览器无法启动时返回可操作的错误，允许重新登录', async t => {
