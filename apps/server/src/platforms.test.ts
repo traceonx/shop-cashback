@@ -4,6 +4,20 @@ import { jdPlugin, orderRows, jdOrderStatus, jdOrderAmounts, resolveJdSku } from
 import { platform, platformForContent } from './platforms/registry'
 import { taobaoPlugin } from './platforms/taobao'
 
+test('淘宝网页登录模式只需有效 PID，不依赖 AppKey；官方模式仍校验应用凭证', () => {
+  assert.equal(taobaoPlugin.configured({ webMode: 'manual', pid: 'mm_123_456_789' }), true)
+  assert.equal(taobaoPlugin.configured({ webMode: 'manual', pid: 'invalid' }), false)
+  assert.equal(taobaoPlugin.configured({ webMode: 'off', pid: 'mm_123_456_789' }), false)
+})
+
+test('淘宝网页登录模式的连接测试只验证浏览器通道，不调用官方 API 或喵有券', async t => {
+  let calls = 0
+  t.mock.method(require('./platforms/taobao/web'), 'webProbe', async () => { calls++ })
+  t.mock.method(globalThis, 'fetch', async () => assert.fail('不应调用其他接口'))
+  assert.match(await taobaoPlugin.test({ webMode: 'manual', pid: 'mm_123_456_789' }), /验证通过/)
+  assert.equal(calls, 1)
+})
+
 test('商品查询兼容官方包装结构，空券信息仍可返回价格和佣金', async () => {
   const original = globalThis.fetch
   try {

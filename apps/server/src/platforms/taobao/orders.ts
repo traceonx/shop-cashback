@@ -1,7 +1,4 @@
-// 淘宝联盟推广订单。两种数据源由后台「订单数据源」明确选择，不做隐式切换：
-//   official     官方推广者：taobao.tbk.order.details.get（应用自身推广者账号）
-//   ecapi        喵有券：taoke/tbkOrderDetailsGet（字段与官方一致）
-// 两者返回同一套订单字段，统一按 trade_parent_id / trade_id 入库；唯一性与数据源无关，切换数据源不会重复入库。
+// 淘宝订单由官方 API 或网页登录查询，按统一订单唯一键入库。
 import { BadRequestException } from '@nestjs/common'
 import { dateText } from '../../database'
 import { decimalCents } from '../jd'
@@ -92,16 +89,12 @@ export function normalizeTaobaoOrder(raw: any): PlatformOrder {
   }
 }
 
-export type TaobaoOrderSource = 'official' | 'ecapi'
+export type TaobaoOrderSource = 'official'
 export const ORDER_SOURCES: Record<TaobaoOrderSource, string> = {
   official: '官方推广者（taobao.tbk.order.details.get）',
-  ecapi: '喵有券（付费接口已停用，请切换）',
 }
-/**
- * 订单数据源：以保存的「订单数据源」为准；旧配置没有该字段时，按旧版实际可用的数据源推断一次（配置了喵有券授权账号则为喵有券，否则为官方推广者），
- * 之后不再在运行中隐式切换。
- */
-export function orderSourceOf(c: PlatformConfig, ecapiConfigured: boolean): TaobaoOrderSource {
+/** 旧第三方订单配置兼容为官方来源；网页登录仍由 webMode 控制。 */
+export function orderSourceOf(c: PlatformConfig): TaobaoOrderSource {
   if (c.orderSource === 'official-sc') return 'official'
   if (c.orderSource && c.orderSource in ORDER_SOURCES) return c.orderSource as TaobaoOrderSource
   return 'official'
@@ -148,8 +141,6 @@ export function readOrderPage(data: any, listOf: (d: any) => unknown): Page {
 }
 
 export type OrderDeps = {
-  /** 喵有券配置 */
-  ecapi?: () => Promise<{ apiKey: string; tbname: string } | null>
   sleep?: (ms: number) => Promise<void>
 }
 const RETRY_DELAYS = [1000, 3000]
@@ -160,7 +151,6 @@ export async function queryTaobaoOrders(
   request: { from: Date; until: Date; page: number; type: 1 | 3; position?: string | null },
   deps: OrderDeps = {},
 ): Promise<{ rows: PlatformOrder[]; hasMore: boolean; position: string | null }> {
-  const source = orderSourceOf(c, false)
   if (request.page > 1 && !request.position) throw new TaobaoOrderError('PARAM', '翻页位点丢失，已停止；请重新同步该时间段')
   const params = {
     query_type: String(request.type === 3 ? 4 : 1), // 1 按创建时间（历史回补）；4 按更新时间（增量）
@@ -175,9 +165,6 @@ export async function queryTaobaoOrders(
   }
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
   const once = async (): Promise<Page> => {
-    if (source === 'ecapi') {
-      throw new TaobaoOrderError('PERMISSION', 'V0 模式已停用喵有券付费订单接口，请改选官方订单接口，或登录淘宝联盟并手动切换到网页通道')
-    }
     const method = 'taobao.tbk.order.details.get'
     const r = await topRequest(c, method, params)
     return readOrderPage(r?.data, (x) => (x.results == null ? null : list(x.results, 'publisher_order_dto')))

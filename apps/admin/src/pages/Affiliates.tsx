@@ -5,7 +5,7 @@ import { dateTime } from '../lib/format'
 import { ProviderTile, useIntegration, type IntegrationKind } from './integration'
 import { TaobaoOrderPanel } from './TaobaoOrderPanel'
 
-type Affiliate = Exclude<IntegrationKind, 'wecom' | 'jd-ecapi' | 'taobao-ecapi'>
+type Affiliate = Exclude<IntegrationKind, 'wecom' | 'jd-ecapi'>
 const meta: Record<
   Affiliate,
   { name: string; description: string; doc: string; testLabel: string; fields: { key: string; hint: string; icon: typeof Tag; readOnly?: boolean }[]; steps: string[] }
@@ -35,7 +35,7 @@ const meta: Record<
       { key: 'pid', hint: '完整 PID，如 mm_1_2_3，保存时自动提取推广位 ID', icon: Tag },
       { key: 'adzoneId', hint: '由 PID 自动提取', icon: Hash, readOnly: true },
     ],
-    steps: ['未开通万能转链时自动按分享标题搜索转链', '同名商品多家店铺在卖时不转链，避免串店', '订单使用官方推广者或网页登录；V0 不调用喵有券付费订单接口', '订单只按推广位关联用户：每个用户独立推广位时精确关联；用默认推广位的订单进入「未关联用户」，需人工关联'],
+    steps: ['未开通万能转链时自动按分享标题搜索转链', '同名商品多家店铺在卖时不转链，避免串店', '订单使用官方推广者或网页登录通道', '订单只按推广位关联用户：每个用户独立推广位时精确关联；用默认推广位的订单进入「未关联用户」，需人工关联'],
   },
 }
 
@@ -132,7 +132,7 @@ function AffiliateCard({ kind }: { kind: Affiliate }) {
 }
 
 // 喵有券第三方接入：独立配置，开关决定该平台链接是否改走喵有券；官方接入不受影响
-type ThirdKind = Extract<IntegrationKind, 'jd-ecapi' | 'taobao-ecapi'>
+type ThirdKind = Extract<IntegrationKind, 'jd-ecapi'>
 const thirdMeta: Record<
   ThirdKind,
   { platform: string; name: string; summary: string; switchLabel: string; doc: string; fields: { key: string; hint: string; icon: typeof Tag }[]; steps: string[] }
@@ -156,24 +156,7 @@ const thirdMeta: Record<
       '子联盟 ID（subUnionId）需在喵有券另行申请，未开通时订单按用户推广位关联',
     ],
   },
-  'taobao-ecapi': {
-    platform: 'taobao',
-    name: '淘宝联盟 · 喵有券',
-    summary: 'V0 免费转链 + 官方查价',
-    switchLabel: '启用（淘宝链接改走喵有券 + 官方混合转链）',
-    doc: 'https://www.ecapi.cn/index/index/openapi/id/6.shtml?ptype=1',
-    fields: [
-      { key: 'apiKey', hint: '喵有券控制台「平台设置」中的 apkey（可与京东共用）', icon: KeyRound },
-      { key: 'tbname', hint: '喵有券「账号授权」中已授权的淘宝用户名', icon: Hash },
-    ],
-    steps: [
-      '先在喵有券「账号授权」授权你的淘宝联盟账号，推广位使用淘宝联盟（官方）中填写的 PID',
-      '把服务器公网出口 IP 加入喵有券白名单；仅使用 V0 免费接口，不自动创建推广位',
-      '流程：免费淘口令 / 商品 ID 转链；返回新版 ID 时再由官方查询价格、券和佣金',
-      '缺少新版 ID 时仅提供推广链接，不猜价格与返现；订单使用官方或网页登录通道',
-      '需保留淘宝联盟（官方）的 AppKey、AppSecret 与 PID；关闭开关则仍走官方接入',
-    ],
-  },
+
 }
 
 function ThirdPartyCard({ kind }: { kind: ThirdKind }) {
@@ -276,7 +259,6 @@ export function Affiliates() {
       <AffiliateCard kind="jd" />
       <ThirdPartyCard kind="jd-ecapi" />
       <AffiliateCard kind="taobao" />
-      <ThirdPartyCard kind="taobao-ecapi" />
       </div>
     </>
   )

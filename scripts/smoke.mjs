@@ -67,6 +67,7 @@ try {
     (await (await request('/auth/login', 'POST', { username: role.toLowerCase() + '@test.invalid', password })).json())
       .data.token
   let token = await login('SUPER_ADMIN')
+  assert.equal((await request('/integrations/taobao-ecapi', 'GET', undefined, token)).status, 400)
   assert.equal((await request('/integrations/taobao/web/login')).status, 401)
   assert.equal((await request('/integrations/taobao/oauth', 'GET', undefined, token)).status, 404)
   assert.equal((await request('/callbacks/taobao/web-session', 'POST', {})).status, 404)

@@ -6,7 +6,7 @@ import { decimalCents, parseJdJson } from '../jd'
 import type { PlatformConfig, PlatformPlugin } from '../types'
 import { dateText } from '../../database'
 import { taobaoFields } from './config'
-import { queryTaobaoOrders, taobaoOrderAmounts, taobaoOrderImage, taobaoOrderSettlement, taobaoOrderStatus, taobaoOrderStatusText, orderSourceOf, type OrderDeps } from './orders'
+import { queryTaobaoOrders, taobaoOrderAmounts, taobaoOrderImage, taobaoOrderSettlement, taobaoOrderStatus, taobaoOrderStatusText, orderSourceOf } from './orders'
 
 const GATEWAY = 'https://eco.taobao.com/router/rest'
 const HOSTS = ['taobao.com', 'tmall.com', 'tmall.hk', 'tb.cn', 'yao.95095.com', 'liangxinyao.com']
@@ -242,17 +242,6 @@ export function parseConvert(resp: any) {
 }
 
 
-/** 生产环境的订单依赖：喵有券配置 */
-export function orderDeps(c: PlatformConfig): OrderDeps {
-  return {
-    ecapi: async () => {
-      const { readConfig } = await import('../../integrations')
-      const { TB_ECAPI_KIND, tbEcapiConfigured } = await import('./ecapi')
-      const t = await readConfig(TB_ECAPI_KIND)
-      return tbEcapiConfigured(t) ? { apiKey: t.apiKey.trim(), tbname: t.tbname.trim() } : null
-    },
-  }
-}
 export const taobaoPlugin: PlatformPlugin = {
   id: 'taobao',
   name: '淘宝',
@@ -263,7 +252,7 @@ export const taobaoPlugin: PlatformPlugin = {
   maxHistoryDays: 90,
   // 官方日常限制 3 小时、大促 20 分钟，统一按 20 分钟分段，避免大促期间报 2007（时间段超出限制）
   maxWindowMs: 20 * 60000,
-  configured: (c) => !!(c.appKey && c.appSecret && c.pid && c.adzoneId),
+  configured: (c) => c.webMode === 'manual' ? /^mm_\d+_\d+_\d+$/.test(c.pid || '') : !!(c.appKey && c.appSecret && c.pid && c.adzoneId),
   normalizeUrl: extractTaobaoUrl,
   // orders.ts 与本文件互相引用，用箭头函数延迟取值，避免加载顺序导致未定义
   orderStatus: (code) => taobaoOrderStatus(code),
@@ -369,6 +358,11 @@ export const taobaoPlugin: PlatformPlugin = {
   },
   // 依次探测：签名 / 商品详情权限 / 万能转链权限 / 淘口令权限
   async test(c) {
+    if (c.webMode === 'manual') {
+      const { webProbe } = await import('./web')
+      await webProbe(true)
+      return '淘宝联盟网页登录与订单查询验证通过；转链使用同一浏览器会话，无需喵有券授权或 AppKey 权限。'
+    }
     const probe = async (method: string, biz: Record<string, unknown>) => {
       try {
         await topRequest(c, method, biz)
@@ -395,8 +389,7 @@ export const taobaoPlugin: PlatformPlugin = {
   async queryOrders(c, request) {
     const { withWebFallback, queryWebOrders } = await import('./web')
     if (request.position?.startsWith('web:')) return queryWebOrders(c, request)
-    const deps = orderDeps(c)
-    const source = orderSourceOf(c, !!(await deps.ecapi!()))
-    return withWebFallback(c, () => queryTaobaoOrders({ ...c, orderSource: source }, request, deps), () => queryWebOrders(c, request))
+    const source = orderSourceOf(c)
+    return withWebFallback(c, () => queryTaobaoOrders({ ...c, orderSource: source }, request), () => queryWebOrders(c, request))
   },
 }

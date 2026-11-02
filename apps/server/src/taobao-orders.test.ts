@@ -111,17 +111,17 @@ test('限流与超时有上限地退避重试；响应格式异常不当作零�
 })
 
 test('数据源选择：明确选择优先；旧配置按一次性推断；切换数据源订单唯一键不变', async () => {
-  assert.equal(orderSourceOf({ orderSource: 'official-sc' }, true), 'official')
-  assert.equal(orderSourceOf({}, true), 'official')
-  assert.equal(orderSourceOf({}, false), 'official')
-  assert.equal(orderSourceOf({ orderSource: 'bogus' }, false), 'official')
+  assert.equal(orderSourceOf({ orderSource: 'official-sc' }), 'official')
+  assert.equal(orderSourceOf({}), 'official')
+  assert.equal(orderSourceOf({}), 'official')
+  assert.equal(orderSourceOf({ orderSource: 'bogus' }), 'official')
   const original = globalThis.fetch
   try {
     globalThis.fetch = async (u) => {
       if (String(u).includes('ecapi.cn')) assert.fail('禁止请求付费订单接口')
       return new Response(okBody('taobao.tbk.order.details.get'))
     }
-    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'ecapi' }, req), /V0.*付费订单/)
+    assert.equal(orderSourceOf({ orderSource: 'ecapi' }), 'official')
     const viaOfficial = await queryTaobaoOrders({ ...c, orderSource: 'official' }, req)
     assert.equal(viaOfficial.rows.length, 1)
   } finally {

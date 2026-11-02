@@ -7,7 +7,6 @@ import { db, json, dateText, centsNumber, audit } from './database'
 import { readConfig } from './integrations'
 import { platformForContent, platform } from './platforms/registry'
 import { ECAPI_KIND, ecapiConvert, ecapiEnabled } from './platforms/jd/ecapi'
-import { TB_ECAPI_KIND, tbEcapiEnabled, tbHybridConvert } from './platforms/taobao/ecapi'
 import { convertWeb, withWebFallback } from './platforms/taobao/web'
 import { dbPositionStore, ensureUserPosition, parsePositionPool } from './platforms/jd/positions'
 import { TAOBAO_ACCOUNT, dbAdzoneStore, ensureUserAdzone, isAdzoneCode, perUserAdzoneEnabled, userPid } from './platforms/taobao/adzones'
@@ -122,10 +121,9 @@ export async function listPromotions() {
 export async function convert(content: string, actor: string, trace: string, userId?: string) {
   const { plugin, url } = platformForContent(content)
   const c = await readConfig(plugin.id)
-  // 喵有券第三方接入开启后：京东链接改由喵有券查券转链；淘宝链接走喵有券 + 官方混合转链（仍需官方凭证）
-  const third =
-    plugin.id === 'jd' ? await readConfig(ECAPI_KIND) : plugin.id === 'taobao' ? await readConfig(TB_ECAPI_KIND) : null
-  const useThird = !!third && (plugin.id === 'jd' ? ecapiEnabled(third) : tbEcapiEnabled(third))
+  // 仅京东使用喵有券；淘宝使用官方 API 或网页登录。
+  const third = plugin.id === 'jd' ? await readConfig(ECAPI_KIND) : null
+  const useThird = !!third && ecapiEnabled(third)
   if (!(useThird && plugin.id === 'jd') && !plugin.configured(c)) throw new BadRequestException('请先保存该平台的应用凭证')
   let trackingCode = ''
   let conf = c
@@ -137,12 +135,12 @@ export async function convert(content: string, actor: string, trace: string, use
   // 淘宝：每个用户用自己的推广位转链，订单回传的 adzone_id 即可精确关联用户；拿不到推广位时退回默认 PID（订单不关联用户）
   if (userId && plugin.id === 'taobao' && perUserAdzoneEnabled(c)) {
     try {
-      const adzone = await ensureUserAdzone(dbAdzoneStore(), c, useThird ? third : null, userId)
+      const adzone = await ensureUserAdzone(dbAdzoneStore(), c, null, userId)
       const pid = adzone ? userPid(c, adzone) : null
       if (adzone && pid) {
         trackingCode = adzone
         conf = { ...c, pid, adzoneId: adzone }
-      } else void positionShortage('taobao', userId, '淘宝推广位池已用完（且未能自动创建推广位）')
+      } else void positionShortage('taobao', userId, '淘宝推广位池已用完，请在联盟后台创建后补充')
     } catch (e) {
       notices.push(`用户专属推广位分配失败，已使用默认推广位：${(e as Error).message}`)
       void positionShortage('taobao', userId, `淘宝用户推广位分配失败：${(e as Error).message}`)
@@ -188,11 +186,9 @@ export async function convert(content: string, actor: string, trace: string, use
     },
   })
   try {
-    const primary = async () => !useThird
-      ? await plugin.convert(conf, url, trackingCode || undefined, content)
-      : plugin.id === 'jd'
-        ? await ecapiConvert(thirdConf!, url, trackingCode || undefined)
-        : await tbHybridConvert(conf, third!, url, content)
+    const primary = async () => useThird
+      ? await ecapiConvert(thirdConf!, url, trackingCode || undefined)
+      : await plugin.convert(conf, url, trackingCode || undefined, content)
     const { link, snapshot } = plugin.id === 'taobao'
       ? await withWebFallback(conf, primary, () => convertWeb(conf, content))
       : await primary()

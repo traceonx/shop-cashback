@@ -4,7 +4,6 @@ export { decimalCents, jdDate, parseJdJson, jdSign, orderRows } from './platform
 import { db, audit, dateText } from './database'
 import { decrypt, encrypt } from './security'
 import { ECAPI_KIND, ecapiConfigured, ecapiFields, ecapiTest } from './platforms/jd/ecapi'
-import { TB_ECAPI_KIND, tbEcapiConfigured, tbEcapiFields, tbEcapiTest } from './platforms/taobao/ecapi'
 import { normalizePublicUrl } from './platforms/taobao/public-url'
 import { orderSourceOf } from './platforms/taobao/orders'
 import { parsePositionPool } from './platforms/jd/positions'
@@ -13,13 +12,11 @@ import { TAOBAO_ACCOUNT, isAdzoneCode, parseAdzonePool } from './platforms/taoba
 /** 第三方接入（喵有券）：不属于联盟平台账号，独立配置并用开关启用 */
 const thirdParty: Record<string, { fields: readonly (readonly [string, string, boolean])[]; configured: (c: Config) => boolean; test: (c: Config) => Promise<string> }> = {
   [ECAPI_KIND]: { fields: ecapiFields, configured: ecapiConfigured, test: ecapiTest },
-  [TB_ECAPI_KIND]: { fields: tbEcapiFields, configured: tbEcapiConfigured, test: tbEcapiTest },
 }
 export const isThirdParty = (kind: string) => Object.hasOwn(thirdParty, kind)
 export const fields = {
   ...Object.fromEntries(listPlatforms().map((p) => [p.id, p.fields])),
   [ECAPI_KIND]: ecapiFields,
-  [TB_ECAPI_KIND]: tbEcapiFields,
   wecom: [
     ['name', '名称', false],
     ['enabled', '启用', false],
@@ -47,7 +44,7 @@ export async function readConfig(kind: Provider): Promise<Config> {
   if (kind !== 'wecom') {
     const c = await db.affiliateConfig.findUnique({ where: { accountId: `${kind}-primary` } })
     const value: Config = c ? decrypt(c.encryptedConfig, `${kind}-primary`) : {}
-    if (kind === 'taobao' && value.orderSource === 'official-sc') value.orderSource = 'official'
+    if (kind === 'taobao' && ['official-sc', 'ecapi'].includes(value.orderSource)) value.orderSource = 'official'
     return value
   }
   const c = await db.channelConfig.findUnique({ where: { channelId: 'wecom-primary' } })
@@ -74,7 +71,7 @@ export async function integrationStatus(kind: Provider) {
     test: test?.value || null,
     callbackPath: '/api/v1/callbacks/wecom',
     // 淘宝：旧配置未保存订单数据源时，展示推断出的实际数据源
-    ...(kind === 'taobao' ? { orderSource: orderSourceOf(cfg, tbEcapiConfigured(await readConfig(TB_ECAPI_KIND))) } : {}),
+    ...(kind === 'taobao' ? { orderSource: orderSourceOf(cfg) } : {}),
     trackingVerified: false,
   }
 }
@@ -118,8 +115,8 @@ export async function saveConfig(kind: Provider, body: unknown, actor: string, t
       if (next[key] && (!Number.isInteger(Number(next[key])) || Number(next[key]) < min || Number(next[key]) > max))
         throw new BadRequestException(`${key} 应为 ${min}～${max} 的整数`)
     }
-    if (next.orderSource === 'official-sc') next.orderSource = 'official'
-    if (next.orderSource && !['official', 'ecapi'].includes(next.orderSource)) throw new BadRequestException('订单数据源无效')
+    if (['official-sc', 'ecapi'].includes(next.orderSource)) next.orderSource = 'official'
+    if (next.orderSource && next.orderSource !== 'official') throw new BadRequestException('订单数据源无效')
     if (next.perUserAdzone && !['true', 'false'].includes(next.perUserAdzone)) throw new BadRequestException('独立推广位开关无效')
     next.publicUrl = normalizePublicUrl(next.publicUrl) || ''
     if (next.pid && !/^mm_\d+_\d+_\d+$/.test(next.pid)) throw new BadRequestException('PID 格式应为 mm_账号_媒体_推广位')
