@@ -1,6 +1,23 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { clearTbIdCache, tbEcapiEnabled, tbHybridConvert } from './platforms/taobao/ecapi'
+import { clearTbIdCache, freeItemInfo, tbEcapiEnabled, tbHybridConvert } from './platforms/taobao/ecapi'
+
+test('免费返回的售价、图片、券门槛和佣金率映射为金额；未知数据不猜测', () => {
+  const data = { item_id: '123', item_info: { num_iid: 123, title: '商品', zk_final_price: '12', reserve_price: '34', pict_url: '//img.alicdn.com/a.jpg' }, has_coupon: true, youhuiquan: '5', quanlimit: '12', max_commission_rate: '6.00' }
+  const goods = freeItemInfo(data)
+  assert.equal(goods.price, 1200)
+  assert.equal(goods.coupon, 500)
+  assert.equal(goods.payablePrice, 700)
+  assert.equal(goods.commission, 42)
+  assert.equal(goods.image, 'https://img.alicdn.com/a.jpg')
+  assert.equal(freeItemInfo({ ...data, quanlimit: '20' }).payablePrice, 1200)
+  assert.equal(freeItemInfo({ ...data, quanlimit: undefined }).commission, null)
+  assert.equal(freeItemInfo({ ...data, coupon_end_time: '2020-01-01' }).payablePrice, null)
+  assert.equal(freeItemInfo({ ...data, item_id: '456' }).price, null)
+  assert.equal(freeItemInfo({ ...data, item_info: { reserve_price: '34' } }).price, null)
+  assert.equal(freeItemInfo({ ...data, has_coupon: false }).commission, 72)
+  assert.equal(freeItemInfo({ ...data, max_commission_rate: '101' }).commission, null)
+})
 import { ecapiCall } from './platforms/jd/ecapi'
 
 test('付费接口在发出网络请求之前被阻止', async t => {
@@ -19,13 +36,15 @@ test('真实分享格式提取 tk：免费接口只返回数字 ID 时仍能转�
     assert.equal(u.pathname, '/taoke/doItemHighCommissionPromotionLinkByTpwd')
     assert.equal(u.searchParams.get('tpwdcode'), '￥2p33TEZWrb3￥')
     assert.equal(u.searchParams.get('pid'), 'mm_1_2_621564417')
-    return new Response(JSON.stringify({ code: 200, data: { item_id: '1020524973653', short_url: 'https://s.click.taobao.com/free', tpwd: '￥FREE￥' } }))
+    return new Response(JSON.stringify({ code: 200, data: { item_id: '1020524973653', short_url: 'https://s.click.taobao.com/free', tpwd: '￥FREE￥', item_info: { zk_final_price: '100', pict_url: '//img.alicdn.com/test.jpg' }, has_coupon: false, max_commission_rate: '2.5' } }))
   })
   const link = 'https://c.tb.cn/h.j3vDjSTEkDzUhHP?tk=2p33TEZWrb3'
   const result = await tbHybridConvert(official, third, link, `【淘宝】${link} CZ028 「暴龙金丝钛近视眼镜框可配度数」`)
   assert.equal(result.link, 'https://s.click.taobao.com/free')
-  assert.equal(result.snapshot.price, null)
-  assert.equal(result.snapshot.commission, null)
+  assert.equal(result.snapshot.price, 10000)
+  assert.equal(result.snapshot.payablePrice, 10000)
+  assert.equal(result.snapshot.commission, 250)
+  assert.equal(result.snapshot.coupon, 0)
   assert.equal(result.snapshot.password, '￥FREE￥')
 })
 

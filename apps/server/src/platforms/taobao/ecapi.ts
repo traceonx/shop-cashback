@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common'
 import type { PlatformConfig, PlatformPlugin } from '../types'
 import { ecapiCall } from '../jd/ecapi'
+import { decimalCents } from '../jd'
 import { isShortTaobao, parseMaterialSearch, resolveShortLink, shareTitle, shortTaobaoLink, topRequest } from './index'
 
 /** 淘宝 V0 免费转链：淘口令 / 商品 ID 转链；仅返回新版 ID 时配合官方物料查询，不调用付费解析。 */
@@ -40,7 +41,47 @@ export const clearTbIdCache = () => idCache.clear()
 
 const auth = (t: PlatformConfig, official: PlatformConfig) => ({ apkey: t.apiKey.trim(), tbname: t.tbname.trim(), pid: official.pid })
 
-/** 免费接口不保证返回新版 ID；没有时仅使用本次推广链接，不猜价格或返现。 */
+/** 只读取本次转链商品的数据，不将划线价当售价；金额均为整数分。 */
+export function freeItemInfo(row: any, now = Date.now()) {
+  const item = row?.item_info || {}
+  const sameItem = row?.item_id == null || item.num_iid == null || String(row.item_id) === String(item.num_iid)
+  const price = sameItem ? decimalCents(item.zk_final_price) : null
+  let coupon: number | null = null, payablePrice: number | null = null
+  const noCoupon = row?.has_coupon === false || row?.has_coupon === 'false'
+  if (noCoupon) { coupon = 0; payablePrice = price }
+  else if (row?.has_coupon === true || row?.has_coupon === 'true') {
+    const amount = decimalCents(row.youhuiquan), quota = decimalCents(row.quanlimit)
+    // 日期字段为北京时间自然日；未知或过期的券不据此估算实付金额。
+    const today = new Date(now + 8 * 3600000).toISOString().slice(0, 10)
+    const start = row.coupon_start_time, end = row.coupon_end_time
+    const valid = (!start || /^\d{4}-\d{2}-\d{2}$/.test(start) && start <= today) &&
+      (!end || /^\d{4}-\d{2}-\d{2}$/.test(end) && end >= today)
+    if (amount !== null && valid) {
+      coupon = amount
+      if (price !== null && quota !== null) {
+        if (price >= quota && amount <= price) payablePrice = price - amount
+        else if (price < quota) { coupon = 0; payablePrice = price }
+      }
+    }
+  }
+  const rate = String(row?.max_commission_rate ?? '')
+  let commission: number | null = null
+  // 百分比保留六位小数，用整数运算向下取分；不把百分比当佣金金额。
+  if (payablePrice !== null && /^\d{1,3}(\.\d{1,6})?$/.test(rate)) {
+    const [whole, fraction = ''] = rate.split('.')
+    const units = BigInt(whole) * 1000000n + BigInt(fraction.padEnd(6, '0'))
+    if (units <= 100000000n) commission = Number(BigInt(payablePrice) * units / 100000000n)
+  }
+  const image = sameItem ? https(item.pict_url) : null
+  return {
+    title: sameItem && typeof item.title === 'string' ? item.title : null,
+    image: image && /^https:\/\//.test(image) ? image : null,
+    shop: sameItem && typeof item.nick === 'string' ? item.nick : null,
+    price, coupon, payablePrice, commission,
+  }
+}
+
+/** 免费转链可直接携带商品信息，不要求先取得新版 ID。 */
 async function promote(t: PlatformConfig, official: PlatformConfig, material: string, numericId?: string | null) {
   const token = /[￥¥]\s*([A-Za-z0-9]{6,30})\s*[￥¥]/.exec(material)?.[1] || /[?&]tk=([A-Za-z0-9]{6,30})/.exec(material)?.[1]
   if (!token && !numericId) throw new BadRequestException('免费转链需要淘口令或明确的商品 ID，请发送完整淘宝分享文案')
@@ -58,7 +99,7 @@ async function promote(t: PlatformConfig, official: PlatformConfig, material: st
     throw new BadRequestException('喵有券未返回有效的淘宝推广链接')
   const newId = isNewId(row.item_id) ? String(row.item_id) : null
   const tpwd = typeof row.tpwd === 'string' ? row.tpwd : null
-  return { url, tpwd, fullTpwd: tpwd, newId }
+  return { url, tpwd, fullTpwd: tpwd, newId, goods: freeItemInfo(row) }
 }
 
 /** 步骤 3：官方物料搜索按新版 ID 精确命中 */
@@ -115,17 +156,18 @@ export async function tbHybridConvert(
       await viaEcapi()
       if (newId) found = await officialById(official, newId, title).catch(() => null)
     }
-  } else notices.push('免费接口未返回新版商品 ID，暂不展示官方价格与预计返现')
+  }
   const p = promo as Awaited<ReturnType<typeof promote>> | null
   let link: string | null, password: string | null
   if (found) {
     link = found.url
     password = null
   } else if (p?.url) {
-    // 官方未命中：用喵有券推广链接兜底，价格和佣金口径不同，不展示预计返现
+    // 官方未命中：使用本次免费转链响应，避免混用其他商品的金额。
     link = p.url
     password = p.fullTpwd
-    notices.push('未取到官方价格与佣金，已使用喵有券推广链接')
+    notices.push('已使用喵有券推广链接与免费商品信息，金额为预估，以结算订单为准')
+    if (p.goods.price === null || p.goods.commission === null) notices.push('免费接口的商品信息或计佣条件不完整，缺失金额待确认')
   } else throw new BadRequestException(`商品${title ? `「${title}」` : ''}暂无法转链${notices.length ? `（${notices.join('；')}）` : ''}`)
   // 官方物料链接很长，转成 s.click.taobao.com 短链；官方转短链不可用时用喵有券的推广短链（同一 PID）
   if (!isShortTaobao(link)) {
@@ -143,17 +185,17 @@ export async function tbHybridConvert(
   return {
     link: link!,
     snapshot: {
-      product: found?.title || title || '淘宝商品',
+      product: found?.title || p?.goods.title || title || '淘宝商品',
       // 新版商品 ID，用于订单按商品匹配下单用户
       sku: newId || undefined,
-      price: found?.price ?? null,
-      imageUrl: found?.image ?? null,
-      commission: found?.commission ?? null,
-      coupon: found?.coupon ?? null,
-      payablePrice: found?.finalPrice ?? null,
+      price: found ? found.price : p?.goods.price ?? null,
+      imageUrl: found ? found.image : p?.goods.image ?? null,
+      commission: found ? found.commission : p?.goods.commission ?? null,
+      coupon: found ? found.coupon : p?.goods.coupon ?? null,
+      payablePrice: found ? found.finalPrice : p?.goods.payablePrice ?? null,
       password: password || undefined,
       infoMessage: notices.join('；'),
-      shop: found?.shop || undefined,
+      shop: (found ? found.shop : p?.goods.shop) || undefined,
       rebate: null,
       finalPrice: null,
       category: '淘宝商品',
