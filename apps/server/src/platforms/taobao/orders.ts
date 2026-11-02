@@ -5,7 +5,6 @@
 import { BadRequestException } from '@nestjs/common'
 import { dateText } from '../../database'
 import { decimalCents } from '../jd'
-import { ecapiCall } from '../jd/ecapi'
 import type { PlatformConfig, PlatformOrder, PlatformOrderStatus } from '../types'
 import { TopError, topRequest } from './index'
 
@@ -96,7 +95,7 @@ export function normalizeTaobaoOrder(raw: any): PlatformOrder {
 export type TaobaoOrderSource = 'official' | 'ecapi'
 export const ORDER_SOURCES: Record<TaobaoOrderSource, string> = {
   official: '官方推广者（taobao.tbk.order.details.get）',
-  ecapi: '喵有券（tbkOrderDetailsGet）',
+  ecapi: '喵有券（付费接口已停用，请切换）',
 }
 /**
  * 订单数据源：以保存的「订单数据源」为准；旧配置没有该字段时，按旧版实际可用的数据源推断一次（配置了喵有券授权账号则为喵有券，否则为官方推广者），
@@ -105,7 +104,7 @@ export const ORDER_SOURCES: Record<TaobaoOrderSource, string> = {
 export function orderSourceOf(c: PlatformConfig, ecapiConfigured: boolean): TaobaoOrderSource {
   if (c.orderSource === 'official-sc') return 'official'
   if (c.orderSource && c.orderSource in ORDER_SOURCES) return c.orderSource as TaobaoOrderSource
-  return ecapiConfigured ? 'ecapi' : 'official'
+  return 'official'
 }
 
 /** 订单查询失败的分类，供同步任务与后台展示 */
@@ -177,10 +176,7 @@ export async function queryTaobaoOrders(
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
   const once = async (): Promise<Page> => {
     if (source === 'ecapi') {
-      const t = await deps.ecapi?.()
-      if (!t) throw new TaobaoOrderError('PERMISSION', '订单数据源为喵有券，但未填写「淘宝联盟 · 喵有券」的 apkey 与授权淘宝用户名')
-      const d = await ecapiCall('taoke/tbkOrderDetailsGet', { apkey: t.apiKey, tbname: t.tbname, ...params })
-      return readOrderPage(d, (x) => x.list)
+      throw new TaobaoOrderError('PERMISSION', 'V0 模式已停用喵有券付费订单接口，请改选官方订单接口，或登录淘宝联盟并手动切换到网页通道')
     }
     const method = 'taobao.tbk.order.details.get'
     const r = await topRequest(c, method, params)

@@ -3,16 +3,7 @@ import type { PlatformConfig, PlatformPlugin } from '../types'
 import { ecapiCall } from '../jd/ecapi'
 import { isShortTaobao, parseMaterialSearch, resolveShortLink, shareTitle, shortTaobaoLink, topRequest } from './index'
 
-/**
- * 淘宝第三方接入：喵有券（ecapi.cn）+ 淘宝官方混合转链。
- * 官方应用没有万能转链 / 万能解析权限，无法把分享链接里的数字商品 ID 换成新版联盟商品 ID，
- * 只能靠标题搜索，同款多店时无法确定原商品。混合流程：
- *   1. 喵有券万能转链 doTbHighCommissionPromotionUrl：传原分享文案 / 淘口令，取得推广淘口令（可能直接带新版 ID）
- *   2. 喵有券万能解析 doCommonPromotionUrlParse：解析推广淘口令，取得新版联盟商品 ID
- *   3. 官方物料搜索 q=uland 商品链接：按新版 ID 精确命中，取价格、优惠、预计佣金和官方推广链接
- * 每个新商品 2 次喵有券调用 + 1 次官方调用；数字 ID → 新版 ID 缓存 24 小时，重复商品只调官方。
- * 文档：https://www.ecapi.cn/index/index/openapi/id/330.shtml、id/346.shtml
- */
+/** 淘宝 V0 免费转链：淘口令 / 商品 ID 转链；仅返回新版 ID 时配合官方物料查询，不调用付费解析。 */
 export const TB_ECAPI_KIND = 'taobao-ecapi'
 export const tbEcapiFields = [
   ['enabled', '启用', false],
@@ -49,25 +40,25 @@ export const clearTbIdCache = () => idCache.clear()
 
 const auth = (t: PlatformConfig, official: PlatformConfig) => ({ apkey: t.apiKey.trim(), tbname: t.tbname.trim(), pid: official.pid })
 
-/** 步骤 1 + 2：用喵有券取得推广链接 / 淘口令和新版商品 ID */
-async function promote(t: PlatformConfig, official: PlatformConfig, material: string) {
-  const data = await ecapiCall('taoke/doTbHighCommissionPromotionUrl', { ...auth(t, official), material_list: material })
-  const row = rowsOf(data?.material_url_list, 'material_url_list')[0] || rowsOf(data?.item_url_list, 'item_url_list')[0]
-  if (!row) throw new BadRequestException('喵有券万能转链未返回结果')
-  if (row.code != null && !['0', '200'].includes(String(row.code)))
-    throw new BadRequestException(`喵有券万能转链未成功：${String(row.msg || row.code).slice(0, 80)}`)
-  const link = row.link_info_dto || {}
-  const url = https(link.coupon_short_url || link.cps_short_url || link.coupon_long_url || link.cps_long_url)
-  const tpwd: string | null = link.coupon_short_tpwd || link.cps_short_tpwd || link.coupon_full_tpwd || link.cps_full_tpwd || null
-  let newId = Number(link.material_type ?? 1) === 1 && isNewId(link.material_id) ? String(link.material_id) : null
-  if (!newId && (tpwd || url)) {
-    const parsed = await ecapiCall('taoke/doCommonPromotionUrlParse', { ...auth(t, official), material_url: tpwd || url! })
-    const id = rowsOf(parsed, 'data')[0]?.link_info_dto?.material_id
-    if (isNewId(id)) newId = String(id)
-  }
-  // 完整口令（含 数字:/ 前缀与链接）在新版手淘里识别率更高，短口令 ￥xxx￥ 常常不弹窗
-  const fullTpwd: string | null = link.coupon_full_tpwd || link.cps_full_tpwd || tpwd
-  return { url, tpwd, fullTpwd, newId }
+/** 免费接口不保证返回新版 ID；没有时仅使用本次推广链接，不猜价格或返现。 */
+async function promote(t: PlatformConfig, official: PlatformConfig, material: string, numericId?: string | null) {
+  const token = /[￥¥]\s*([A-Za-z0-9]{6,30})\s*[￥¥]/.exec(material)?.[1] || /[?&]tk=([A-Za-z0-9]{6,30})/.exec(material)?.[1]
+  if (!token && !numericId) throw new BadRequestException('免费转链需要淘口令或明确的商品 ID，请发送完整淘宝分享文案')
+  const method = token ? 'doItemHighCommissionPromotionLinkByTpwd' : 'doItemHighCommissionPromotionLink'
+  const data = await ecapiCall('taoke/' + method, {
+    ...auth(t, official), ...(token ? { tpwdcode: '￥' + token + '￥' } : { itemid: numericId! }),
+    shorturl: '1', tpwd: '1', hasiteminfo: '1',
+  })
+  const row = Array.isArray(data) ? data[0] : data
+  const url = https(row?.short_url || row?.coupon_click_url || row?.item_url)
+  if (!url) throw new BadRequestException('喵有券免费转链未返回推广链接')
+  const target = new URL(url)
+  if (target.protocol !== 'https:' || target.username || target.password || target.port ||
+      !/(^|\.)(taobao\.com|tmall\.com|tb\.cn)$/.test(target.hostname))
+    throw new BadRequestException('喵有券未返回有效的淘宝推广链接')
+  const newId = isNewId(row.item_id) ? String(row.item_id) : null
+  const tpwd = typeof row.tpwd === 'string' ? row.tpwd : null
+  return { url, tpwd, fullTpwd: tpwd, newId }
 }
 
 /** 步骤 3：官方物料搜索按新版 ID 精确命中 */
@@ -107,7 +98,7 @@ export async function tbHybridConvert(
   let ecapiShort = hit && hit.pid === official.pid ? hit.short : null
   let found: Awaited<ReturnType<typeof officialById>> = null
   const viaEcapi = async () => {
-    promo = await promote(t, official, material)
+    promo = await promote(t, official, material, resolved.fromPage ? null : resolved.itemId)
     newId = promo.newId
     ecapiShort = isShortTaobao(promo.url) ? promo.url : null
     if (newId) remember(numericId, newId, ecapiShort, official.pid)
@@ -124,7 +115,7 @@ export async function tbHybridConvert(
       await viaEcapi()
       if (newId) found = await officialById(official, newId, title).catch(() => null)
     }
-  } else notices.push('喵有券未解析出新版商品 ID')
+  } else notices.push('免费接口未返回新版商品 ID，暂不展示官方价格与预计返现')
   const p = promo as Awaited<ReturnType<typeof promote>> | null
   let link: string | null, password: string | null
   if (found) {
@@ -172,12 +163,9 @@ export async function tbHybridConvert(
 }
 
 export async function tbEcapiTest(t: PlatformConfig) {
-  const list = rowsOf(await ecapiCall('taoke/getTbAuthList', { apkey: t.apiKey.trim() }), 'data')
-  const hit = list.find((v: any) => String(v?.tbname) === t.tbname.trim())
-  if (!hit)
-    throw new BadRequestException(
-      `喵有券授权列表中没有「${t.tbname.trim()}」，请先在喵有券「账号授权」中授权该淘宝账号（当前已授权：${list.map((v: any) => v?.tbname).filter(Boolean).join('、') || '无'}）`,
-    )
-  const expire = hit.auth_expire_date ? `，授权到期 ${String(hit.auth_expire_date).slice(0, 19)}` : ''
-  return `喵有券接口可用，淘宝账号「${hit.tbname}」已授权${expire}。${t.enabled === 'true' ? '淘宝链接将走喵有券 + 官方混合转链。' : '当前未启用，淘宝链接仍走官方接入。'}`
+  const { readConfig } = await import('../../integrations')
+  const c = await readConfig('taobao')
+  if (!c.pid) throw new BadRequestException('请先保存淘宝联盟默认 PID')
+  await ecapiCall('taoke/getTkMaterialItem', { ...auth(t, c), q: '眼镜', pageno: '1', pagesize: '1' })
+  return '喵有券免费商品查询接口可用；淘宝转链仅使用免费淘口令 / 商品 ID 接口，订单请使用官方或网页登录通道。'
 }

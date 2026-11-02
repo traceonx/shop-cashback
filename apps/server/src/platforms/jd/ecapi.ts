@@ -47,6 +47,12 @@ function list(value: any, element: string): any[] | null {
 
 /** 喵有券通用 GET 调用（京东 / 淘宝共用）：path 如 jingdong/getJdUnionItems、taoke/doCommonPromotionUrlParse */
 export async function ecapiCall(path: string, params: Record<string, string | undefined>) {
+  // 淘宝仅开放已核实的 V0 接口；阻止旧代码或后续回退路径误用付费能力。
+  if (path.startsWith('taoke/') && ![
+    'taoke/doItemHighCommissionPromotionLinkByTpwd',
+    'taoke/doItemHighCommissionPromotionLink',
+    'taoke/getTkMaterialItem',
+  ].includes(path)) throw new BadRequestException('淘宝 V0 模式禁止调用此接口，请使用免费转链、官方订单或网页登录通道')
   const query = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') query.set(k, v)
   let response: Response

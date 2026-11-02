@@ -1,6 +1,33 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { clearTbIdCache, tbEcapiEnabled, tbHybridConvert } from './platforms/taobao/ecapi'
+import { ecapiCall } from './platforms/jd/ecapi'
+
+test('付费接口在发出网络请求之前被阻止', async t => {
+  t.mock.method(globalThis, 'fetch', async () => assert.fail('不应发出付费请求'))
+  for (const method of ['doTbHighCommissionPromotionUrl', 'doCommonPromotionUrlParse', 'tbkOrderDetailsGet', 'adzoneCreate', 'getTbAuthList']) {
+    await assert.rejects(ecapiCall('taoke/' + method, { apkey: 'test' }), /V0.*禁止/)
+  }
+})
+
+test('真实分享格式提取 tk：免费接口只返回数字 ID 时仍能转链，不调用付费解析或猜价格', async t => {
+  clearTbIdCache()
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const u = new URL(String(input))
+    if (u.hostname === 'c.tb.cn') return new Response('普通落地页')
+    assert.equal(u.hostname, 'api.web.ecapi.cn')
+    assert.equal(u.pathname, '/taoke/doItemHighCommissionPromotionLinkByTpwd')
+    assert.equal(u.searchParams.get('tpwdcode'), '￥2p33TEZWrb3￥')
+    assert.equal(u.searchParams.get('pid'), 'mm_1_2_621564417')
+    return new Response(JSON.stringify({ code: 200, data: { item_id: '1020524973653', short_url: 'https://s.click.taobao.com/free', tpwd: '￥FREE￥' } }))
+  })
+  const link = 'https://c.tb.cn/h.j3vDjSTEkDzUhHP?tk=2p33TEZWrb3'
+  const result = await tbHybridConvert(official, third, link, `【淘宝】${link} CZ028 「暴龙金丝钛近视眼镜框可配度数」`)
+  assert.equal(result.link, 'https://s.click.taobao.com/free')
+  assert.equal(result.snapshot.price, null)
+  assert.equal(result.snapshot.commission, null)
+  assert.equal(result.snapshot.password, '￥FREE￥')
+})
 
 const official = { appKey: 'k', appSecret: 's', pid: 'mm_1_2_621564417', adzoneId: '621564417' }
 const third = { enabled: 'true', apiKey: 'ak', tbname: 'shop' }
@@ -21,12 +48,9 @@ function mock(officialRows: unknown[], spreadOk = true) {
       calls.push(u.pathname)
       assert.equal(u.searchParams.get('tbname'), 'shop')
       assert.equal(u.searchParams.get('pid'), 'mm_1_2_621564417')
-      if (u.pathname.endsWith('doTbHighCommissionPromotionUrl')) {
-        assert.equal(u.searchParams.get('material_list'), content)
-        return new Response(JSON.stringify({ code: 200, data: { material_url_list: [{ link_info_dto: { material_type: 1, material_id: '1020524973653', cps_short_url: 'https://s.click.taobao.com/ecapi', cps_short_tpwd: '￥ECAPI￥' } }] } }))
-      }
-      assert.equal(u.searchParams.get('material_url'), '￥ECAPI￥')
-      return new Response(JSON.stringify({ code: 200, data: [{ link_info_dto: { material_id: 'oQa8pyahrt-NEWID' } }] }))
+      assert.equal(u.pathname, '/taoke/doItemHighCommissionPromotionLink')
+      assert.equal(u.searchParams.get('itemid'), '1020524973653')
+      return new Response(JSON.stringify({ code: 200, data: { item_id: 'oQa8pyahrt-NEWID', short_url: 'https://s.click.taobao.com/ecapi', tpwd: '￥ECAPI￥' } }))
     }
     const p = init!.body as URLSearchParams
     calls.push(p.get('method')!)
@@ -60,9 +84,9 @@ test('喵有券解析新版 ID 后按 ID 命中官方物料，同款他店不会
     assert.equal(r.snapshot.coupon, 9500)
     assert.equal(r.snapshot.commission, 1336)
     assert.equal(r.snapshot.password, '￥OFFICIAL￥')
-    assert.equal(calls.filter((c) => c.startsWith('/taoke/')).length, 2)
+    assert.equal(calls.filter((c) => c.startsWith('/taoke/')).length, 1)
     await tbHybridConvert(official, third, url, content)
-    assert.equal(calls.filter((c) => c.startsWith('/taoke/')).length, 2)
+    assert.equal(calls.filter((c) => c.startsWith('/taoke/')).length, 1)
   } finally {
     globalThis.fetch = original
   }
@@ -124,20 +148,19 @@ test('不同分享短链即使落地页里搜到同一个数字 ID，也不会�
       // 两个短链都返回包含同一个无关 ID 的落地页
       if (u.hostname === 'c.tb.cn') return new Response('<script src="//g.alicdn.com/x.js?id=99999999"></script>', { status: 200 })
       if (u.hostname === 'api.web.ecapi.cn') {
-        if (u.pathname.endsWith('doTbHighCommissionPromotionUrl')) {
-          const m = u.searchParams.get('material_list')!
-          ecapiMaterials.push(m)
-          const id = m.includes('AAA') ? 'aaaaaaaa-NEWA' : 'bbbbbbbb-NEWB'
-          return new Response(JSON.stringify({ code: 200, data: { material_url_list: [{ link_info_dto: { material_type: 1, material_id: id, cps_short_url: `https://s.click.taobao.com/${id.slice(0, 4)}` } }] } }))
-        }
+        assert.equal(u.pathname, '/taoke/doItemHighCommissionPromotionLinkByTpwd')
+        const m = u.searchParams.get('tpwdcode')!
+        ecapiMaterials.push(m)
+        const id = m.includes('AAAAAA') ? 'aaaaaaaa-NEWA' : 'bbbbbbbb-NEWB'
+        return new Response(JSON.stringify({ code: 200, data: { item_id: id, short_url: 'https://s.click.taobao.com/' + id.slice(0, 4) } }))
       }
       const p = init!.body as URLSearchParams
       if (p.get('method') === 'taobao.tbk.tpwd.create') return new Response(JSON.stringify({ tbk_tpwd_create_response: { data: { password_simple: '￥T￥' } } }))
       const id = p.get('q')!.split('id=')[1]
       return new Response(JSON.stringify({ tbk_dg_material_optional_upgrade_response: { result_list: { map_data: [{ ...row(id, id.endsWith('NEWA') ? 'A店' : 'B店'), publish_info: { click_url: `//s.click.taobao.com/${id.slice(0, 4)}`, income_info: { commission_amount: '1' } } }] } } }))
     }
-    const a = await tbHybridConvert(official, third, 'https://c.tb.cn/h.AAA?tk=1', '【淘宝】https://c.tb.cn/h.AAA?tk=1 「A商品」')
-    const b = await tbHybridConvert(official, third, 'https://c.tb.cn/h.BBB?tk=2', '【淘宝】https://c.tb.cn/h.BBB?tk=2 「B商品」')
+    const a = await tbHybridConvert(official, third, 'https://c.tb.cn/h.AAA?tk=AAAAAA', '【淘宝】https://c.tb.cn/h.AAA?tk=AAAAAA 「A商品」')
+    const b = await tbHybridConvert(official, third, 'https://c.tb.cn/h.BBB?tk=BBBBBB', '【淘宝】https://c.tb.cn/h.BBB?tk=BBBBBB 「B商品」')
     assert.equal(a.snapshot.shop, 'A店')
     assert.equal(b.snapshot.shop, 'B店')
     assert.equal(ecapiMaterials.length, 2)

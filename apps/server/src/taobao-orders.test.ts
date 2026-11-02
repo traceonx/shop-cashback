@@ -112,20 +112,18 @@ test('限流与超时有上限地退避重试；响应格式异常不当作零�
 
 test('数据源选择：明确选择优先；旧配置按一次性推断；切换数据源订单唯一键不变', async () => {
   assert.equal(orderSourceOf({ orderSource: 'official-sc' }, true), 'official')
-  assert.equal(orderSourceOf({}, true), 'ecapi')
+  assert.equal(orderSourceOf({}, true), 'official')
   assert.equal(orderSourceOf({}, false), 'official')
   assert.equal(orderSourceOf({ orderSource: 'bogus' }, false), 'official')
   const original = globalThis.fetch
   try {
     globalThis.fetch = async (u) => {
-      if (String(u).includes('ecapi.cn')) return new Response(JSON.stringify({ code: 200, data: { has_next: false, list: [order] } }))
+      if (String(u).includes('ecapi.cn')) assert.fail('禁止请求付费订单接口')
       return new Response(okBody('taobao.tbk.order.details.get'))
     }
-    const viaEcapi = await queryTaobaoOrders({ ...c, orderSource: 'ecapi' }, req, { ecapi: async () => ({ apiKey: 'ak', tbname: 'tb' }) })
+    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'ecapi' }, req), /V0.*付费订单/)
     const viaOfficial = await queryTaobaoOrders({ ...c, orderSource: 'official' }, req)
-    // 入库唯一键（平台、账号、订单号、子订单号）与数据源无关
-    assert.deepEqual([viaEcapi.rows[0].orderId, viaEcapi.rows[0].lineId], [viaOfficial.rows[0].orderId, viaOfficial.rows[0].lineId])
-    await assert.rejects(queryTaobaoOrders({ ...c, orderSource: 'ecapi' }, req, { ecapi: async () => null }), /喵有券/)
+    assert.equal(viaOfficial.rows.length, 1)
   } finally {
     globalThis.fetch = original
   }

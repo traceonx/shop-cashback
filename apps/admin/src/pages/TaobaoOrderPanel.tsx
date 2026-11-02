@@ -9,7 +9,7 @@ import { TaobaoWebPanel } from './TaobaoWebPanel'
 type Source = 'official' | 'ecapi'
 const sources: [Source, string][] = [
   ['official', '官方推广者（taobao.tbk.order.details.get）'],
-  ['ecapi', '喵有券（tbkOrderDetailsGet）'],
+  ['ecapi', '喵有券（付费接口已停用，请切换）'],
 ]
 
 type Sync = { status: string; count: number; windows: number; total: number; error?: string | null; lastSyncedAt?: string | null; auto?: boolean } | null

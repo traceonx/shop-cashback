@@ -19,39 +19,14 @@ const memStore = (init: Record<string, string> = {}) => {
   return { m, store }
 }
 
-test('首次转链创建推广位并保存，之后复用；并发只创建一次', async () => {
-  const { m, store } = memStore()
-  const calls: Record<string, string>[] = []
-  const create = async (p: Record<string, string>) => {
-    calls.push(p)
-    await new Promise((r) => setTimeout(r, 10))
-    return { model: 'mm_133091730_45556678_1000001' }
-  }
-  const [a, b] = await Promise.all([
-    ensureUserAdzone(store, official, third, 'user-aaaaaaaa-1', create),
-    ensureUserAdzone(store, official, third, 'user-aaaaaaaa-1', create),
-  ])
-  assert.equal(a, '1000001')
-  assert.equal(b, '1000001')
-  assert.equal(calls.length, 1)
-  assert.equal(calls[0].site_id, '45556678')
-  assert.equal(m.get('user-aaaaaaaa-1'), '1000001')
-  assert.equal(await ensureUserAdzone(store, official, third, 'user-aaaaaaaa-1', create), '1000001')
-  assert.equal(calls.length, 1)
-  assert.equal(userPid(official, '1000001'), 'mm_133091730_45556678_1000001')
+test('已有推广位直接复用；池空时即使有喵有券配置也不创建', async () => {
+  const { store } = memStore({ u1: '1000001' })
+  const create = async () => assert.fail('禁止调用付费创建接口')
+  assert.equal(await ensureUserAdzone(store, official, third, 'u1', create), '1000001')
+  assert.equal(await ensureUserAdzone(store, official, third, 'u2', create), null)
 })
 
-test('旧版随机标识会被替换；返回其他账号或网站的 PID 时拒绝', async () => {
-  const { m, store } = memStore({ u1: 'ab12cd34ef56ab12cd34ef56ab12cd34' })
-  assert.equal(isAdzoneCode('ab12cd34ef56ab12cd34ef56ab12cd34'), false)
-  assert.equal(await ensureUserAdzone(store, official, third, 'u1', async () => ({ model: 'mm_133091730_45556678_222' })), '222')
-  assert.equal(m.get('u1'), '222')
-  await assert.rejects(ensureUserAdzone(store, official, third, 'u2', async () => ({ model: 'mm_999_45556678_333' })))
-  await assert.rejects(ensureUserAdzone(store, official, third, 'u3', async () => ({ model: 'mm_133091730_1_333' })))
-  assert.equal(m.has('u2'), false)
-})
-
-test('先从推广位池分配，每人一个且不重复；池子用完再自动创建', async () => {
+test('先从推广位池分配，每人一个且不重复；池子用完不调用付费接口', async () => {
   const pooled = { ...official, adzonePool: 'mm_133091730_45556678_501\nmm_133091730_9_502' }
   const { m, store } = memStore()
   let created = 0
@@ -62,9 +37,10 @@ test('先从推广位池分配，每人一个且不重复；池子用完再自�
   ])
   assert.deepEqual([a, b].sort(), ['501', '502'])
   assert.equal(created, 0)
-  assert.equal(await ensureUserAdzone(store, pooled, third, 'C', create), '901')
+  assert.equal(await ensureUserAdzone(store, pooled, third, 'C', create), null)
   assert.equal(await ensureUserAdzone(store, pooled, null, 'D', create), null)
-  assert.equal(m.size, 3)
+  assert.equal(m.size, 2)
+  assert.equal(created, 0)
   // 不同网站的池中推广位按池里的 PID 转链
   assert.equal(userPid(pooled, '502'), 'mm_133091730_9_502')
   assert.equal(userPid(pooled, '901'), 'mm_133091730_45556678_901')

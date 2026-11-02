@@ -2,13 +2,10 @@
 // 订单里的 adzone_id 即可精确对应到用户（与京东 subUnionId 一样作为联盟回传标识）。
 // 推广位来源按顺序：
 //   1. 推广位池（adzonePool）：管理员在淘宝联盟后台建好、填进配置的 PID，取第一个未绑定的；
-//   2. 池子用完且开启喵有券淘宝接入时，调用喵有券 taoke/adzoneCreate 自动创建
-//      （https://www.ecapi.cn/index/index/openapi/id/333.shtml?ptype=1，付费会员接口），建在默认 PID 的同一网站下；
-//   3. 都不行时返回 null，由调用方使用默认 PID（订单不关联用户，并提醒管理员补充）。
+//   2. 池子耗尽后返回 null，提醒管理员补充；不自动创建推广位。
 // 绑定后不回收：推广位一直属于这个用户，旧链接多久以后下单都能对上。
 import { BadRequestException } from '@nestjs/common'
 import type { PlatformConfig } from '../types'
-import { ecapiCall } from '../jd/ecapi'
 
 export const TAOBAO_ACCOUNT = 'taobao-primary'
 const PID = /^mm_(\d+)_(\d+)_(\d+)$/
@@ -72,7 +69,7 @@ export async function ensureUserAdzone(
   official: PlatformConfig,
   third: PlatformConfig | null,
   userId: string,
-  create: AdzoneCreate = (p) => ecapiCall('taoke/adzoneCreate', p),
+  _create?: AdzoneCreate,
 ): Promise<string | null> {
   const existing = await store.find(userId)
   if (isAdzoneCode(existing)) return existing
@@ -83,13 +80,7 @@ export async function ensureUserAdzone(
     for (const entry of parseAdzonePool(official.adzonePool, official)) {
       if (!used.has(entry.adzone) && (await store.save(userId, entry.adzone))) return entry.adzone
     }
-    const m = PID.exec(official.pid || '')
-    if (!m || !third || third.enabled !== 'true' || !third.apiKey?.trim() || !third.tbname?.trim()) return null
-    const data = await create({ apkey: third.apiKey.trim(), tbname: third.tbname.trim(), site_id: m[2], adzone_name: `拾惠用户-${userId.slice(0, 8)}` })
-    const got = PID.exec(String(data?.model ?? data?.pid ?? data ?? ''))
-    if (!got || got[1] !== m[1] || got[2] !== m[2]) throw new BadRequestException('喵有券未返回本账号下的推广位 PID')
-    if (!(await store.save(userId, got[3]))) throw new BadRequestException('新建的推广位已被占用')
-    return got[3]
+    return null // V0 模式不自动调用付费的创建推广位接口
   })
 }
 
