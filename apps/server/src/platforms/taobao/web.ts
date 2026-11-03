@@ -21,7 +21,10 @@ async function mutate<T>(fn: (s: State) => Promise<T> | T): Promise<T> {
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${LOCK})`)
     const row = await tx.systemConfig.findUnique({ where: { key: KEY } })
     const s = row ? decrypt<State>((row.value as any).encrypted, KEY) : { state: 'NONE' as const }
+    const before = JSON.stringify(s)
     const result = await fn(s)
+    // 只读或未变化时不写库：等待请求间隔、查询状态都会频繁调用，每次重写加密行会持续占用 CPU 并让表膨胀
+    if (row && JSON.stringify(s) === before) return result
     const value = { encrypted: encrypt(s, KEY) }
     await tx.systemConfig.upsert({ where: { key: KEY }, create: { key: KEY, value }, update: { value } })
     return result
@@ -75,18 +78,23 @@ async function requestWeb(endpoint: 'report.getTbkOrderDetails' | 'xt.entry', pa
   const rpm = Math.min(20, Math.max(1, Number(c.webRpm) || 20))
   const deadline = Date.now() + Math.max(35000, Math.ceil(60000 / rpm) + 5000)
   let ticket: { cookie: string; lease: string; generation: string; userAgent: string; transport?: 'http' | 'browser' } | null = null
+  let retryIn = 300
   while (!ticket && Date.now() < deadline) {
     ticket = await mutate(s => {
       if (!candidate && (!s.cookie || !s.generation || (!verify && ['NONE', 'PENDING', 'EXPIRED', 'VERIFY'].includes(s.state))))
         throw new WebError(s.state, '淘宝网页会话不可用，请在联盟配置重新登录')
       if (!candidate && s.account !== /^mm_(\d+)_/.exec(c.pid || '')?.[1]) throw new WebError('VERIFY', '默认 PID 账号已变更，请重新登录')
       const now = Date.now()
-      if ((s.nextAt || 0) > now || (s.leaseUntil || 0) > now) return null
-      s.lease = randomUUID(); s.leaseUntil = now + 30000; s.nextAt = now + Math.ceil(60000 / rpm)
+      if ((s.nextAt || 0) > now || (s.leaseUntil || 0) > now) {
+        // 按下一次可请求的时间等待，不再每 300 毫秒开一次数据库事务轮询
+        retryIn = Math.min(5000, Math.max(300, Math.max(s.nextAt || 0, s.leaseUntil || 0) - now))
+        return null
+      }
+      s.lease = randomUUID(); s.leaseUntil = now + 60000; s.nextAt = now + Math.ceil(60000 / rpm)
       return { transport: candidate?.transport || s.transport, cookie: candidate?.cookie || s.cookie!, lease: s.lease, generation: s.generation || '',
         userAgent: candidate?.userAgent || s.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' }
     })
-    if (!ticket) await wait(300)
+    if (!ticket) await wait(Math.min(retryIn, Math.max(0, deadline - Date.now())))
   }
   if (!ticket) throw new WebError('LIMITED', '淘宝网页备用通道繁忙，请稍后重试')
   let error: WebError | undefined
@@ -156,6 +164,10 @@ export async function withWebFallback<T>(c: PlatformConfig, primary: () => Promi
   }
 }
 type Cursor = { from: string; until: string; day: string; page: number; position: string }
+/** 自动增量同步平时只重扫最近 2 天；完整回溯（回溯天数配置）每 6 小时一次，用于更新结算、失效等后续状态 */
+const RECENT_DAYS = 2
+const FULL_EVERY = 6 * 3600000
+let lastFullScan = 0
 export async function queryWebOrders(c: PlatformConfig, req: { from: Date; until: Date; page: number; type: 1 | 3; position?: string | null; webUntil?: Date }) {
   // 网页 queryType=2 的时间口径不能冒充官方更新时间查询：增量同步保守重扫回溯范围。
   // 每次只请求一天，分页游标与查询范围一起持久化，避免跨源混用。
@@ -164,7 +176,12 @@ export async function queryWebOrders(c: PlatformConfig, req: { from: Date; until
     try { cursor = JSON.parse(Buffer.from(req.position.slice(4), 'base64url').toString()) } catch { throw new BadRequestException('网页订单游标损坏') }
   } else {
     const until = req.type === 3 ? req.webUntil || req.until : req.until
-    const from = req.type === 3 ? new Date(until.getTime() - (Math.min(90, Math.max(1, Number(c.webLookbackDays) || 90)) - 1) * 86400000) : req.from
+    const lookback = Math.min(90, Math.max(1, Number(c.webLookbackDays) || 90))
+    // 以前每次自动同步（高峰期 5 秒一次）都把 90 天逐日翻页重扫，任务几乎不停，浏览器与数据库长期高负载
+    const full = Date.now() - lastFullScan >= FULL_EVERY
+    if (req.type === 3 && full) lastFullScan = Date.now()
+    const days = full ? lookback : Math.min(lookback, RECENT_DAYS)
+    const from = req.type === 3 ? new Date(until.getTime() - (days - 1) * 86400000) : req.from
     const end = day(new Date(until.getTime() - 1))
     cursor = { from: day(from), until: end, day: end, page: 1, position: '' }
   }

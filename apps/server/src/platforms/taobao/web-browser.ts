@@ -9,11 +9,22 @@ import { WebError } from './web-core'
 
 const HOME = 'https://pub.alimama.com/portal/v2/effect/order/overviewOrder/page/index.htm'
 const WIDTH = 1280, HEIGHT = 800
+/**
+ * 浏览器会话需要常驻（订单请求在联盟页面内同源发出），容器里收紧 Chromium 的资源占用：
+ * 关闭 GPU、后台网络服务与组件更新，限制渲染进程数量和 V8 堆大小。
+ */
+const LEAN_ARGS = [
+  '--disable-gpu', '--disable-extensions', '--disable-background-networking', '--disable-component-update',
+  '--disable-default-apps', '--disable-sync', '--mute-audio', '--no-first-run', '--renderer-process-limit=1',
+  '--disable-features=Translate,MediaRouter,OptimizationHints', '--js-flags=--max-old-space-size=512',
+]
+/** 联盟页面是单页应用，长时间挂着会持续累积内存；连接后每隔一段时间在空闲时重新加载一次 */
+const REFRESH_EVERY = 60 * 60000
 type Login = {
   id: string; state: 'OPENING' | 'WAITING' | 'VERIFYING' | 'CONNECTED' | 'ERROR' | 'CANCELLED';
   message: string; expiresAt: number; context?: BrowserContext; page?: Page;
   timer?: NodeJS.Timeout; expires?: NodeJS.Timeout; checking?: boolean;
-  paused?: boolean; nextCheckAt?: number;
+  paused?: boolean; nextCheckAt?: number; refreshedAt?: number;
 }
 let current: Login | undefined
 const active = (login: Login) => current === login && !['CANCELLED', 'ERROR', 'CONNECTED'].includes(login.state)
@@ -50,7 +61,7 @@ async function launch(login: Login) {
       headless: linux && !process.env.DISPLAY,
       viewport: { width: WIDTH, height: HEIGHT },
       ...(executablePath ? { executablePath } : { channel: process.env.TAOBAO_BROWSER_CHANNEL || 'chrome' }),
-      ...(linux ? { args: ['--no-sandbox', '--disable-dev-shm-usage'] } : {}),
+      ...(linux ? { args: ['--no-sandbox', '--disable-dev-shm-usage', ...LEAN_ARGS] } : {}),
     }
     const profile = resolve(process.env.DATA_DIR || 'data', 'taobao-web-browser')
     let context: BrowserContext
@@ -69,6 +80,9 @@ async function launch(login: Login) {
         const u = new URL(req.url())
         if (!/(^|\.)(taobao\.com|tmall\.com|alimama\.com|alipay\.com)$/.test(u.hostname)) return route.abort()
       }
+      // 登录成功后页面只用来发同源请求，不再加载图片、视频、字体，降低内存与 CPU；
+      // 需要人工验证时（未连接）照常加载，二维码和滑块验证不受影响。
+      if (login.state === 'CONNECTED' && ['image', 'media', 'font'].includes(req.resourceType())) return route.abort()
       return route.continue()
     })
     context.on('close', () => {
@@ -107,7 +121,7 @@ async function check(login: Login, manual = false) {
     login.state = 'VERIFYING'; login.message = '正在验证淘宝联盟会话…'
     await connectWebLogin(cookies, userAgent, () => active(login), 'browser')
     if (!active(login)) return
-    login.state = 'CONNECTED'; login.message = '淘宝联盟登录成功，已连接。'
+    login.state = 'CONNECTED'; login.message = '淘宝联盟登录成功，已连接。'; login.refreshedAt = Date.now()
     // 后续请求继续使用扫码的浏览器会话，保留自动更新的 Cookie。
     clearInterval(login.timer); clearTimeout(login.expires)
   } catch (e) {
@@ -134,9 +148,14 @@ export async function browserWebRequest(endpoint: string, query: string) {
   const page = current?.page
   if (!page || page.isClosed() || !current?.context || !['WAITING', 'VERIFYING', 'CONNECTED'].includes(current.state))
     throw new WebError('VERIFY', '网页登录浏览器未连接，请重新打开登录页面')
+  if (!['report.getTbkOrderDetails', 'xt.entry'].includes(endpoint)) throw new BadRequestException('网页接口无效')
+  // 已连接且超过刷新间隔时先重新加载页面，释放单页应用累积的内存（请求由租约串行，此时没有其他请求在用页面）
+  if (current.state === 'CONNECTED' && Date.now() - (current.refreshedAt || 0) >= REFRESH_EVERY) {
+    current.refreshedAt = Date.now()
+    await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => undefined)
+  }
   if (new URL(page.url()).hostname !== 'pub.alimama.com')
     throw new WebError('VERIFY', '请在浏览器完成官方登录或验证，并返回淘宝联盟')
-  if (!['report.getTbkOrderDetails', 'xt.entry'].includes(endpoint)) throw new BadRequestException('网页接口无效')
   const params = new URLSearchParams(query)
   const cookies = await current.context.cookies('https://pub.alimama.com/openapi/param2/1/gateway.unionpub/')
   const csrf = cookies.filter(c => c.name === '_tb_token_').sort((a, b) => b.path.length - a.path.length)[0]
